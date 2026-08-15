@@ -1,0 +1,6 @@
+{
+  "appId": "com.oplira.fys",
+  "appName": "Oplira FYS",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

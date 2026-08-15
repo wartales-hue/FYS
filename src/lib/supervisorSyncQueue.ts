@@ -184,31 +184,71 @@ async function processQueueItem(itemId: string): Promise<boolean> {
       hasPdfAttachment: Boolean(item.pdfBase64)
     };
 
-    // Simulate network transmission delay / resilient endpoint post
-    await new Promise(resolve => setTimeout(resolve, 800));
+    // Real backend API dispatch with fallback resilience
+    let isDispatched = false;
+    let errorMessage = '';
 
-    // In a production backend, this would POST to /api/dispatch-supervisor-email or EmailJS / Resend
-    // We log verified digital transmission proof
-    console.log('✅ [Supervisor Email Dispatcher] Transmisión exitosa al supervisor:', {
-      to: item.supervisorEmail,
-      worker: item.workerName,
-      hash: item.hashSha256,
-      timestamp: new Date().toISOString()
-    });
+    try {
+      const response = await fetch('/api/send-supervisor-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(emailPayload),
+      });
 
-    const refreshed = getSupervisorQueue();
-    const idx = refreshed.findIndex(i => i.id === itemId);
-    if (idx !== -1) {
-      refreshed[idx] = {
-        ...refreshed[idx],
-        syncStatus: 'synced',
-        syncedAt: new Date().toISOString(),
-        retryCount: refreshed[idx].retryCount + 1,
-        lastError: undefined
-      };
-      saveQueue(refreshed);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          isDispatched = true;
+        } else {
+          errorMessage = result.error || 'Respuesta no exitosa del servidor';
+        }
+      } else {
+        errorMessage = `Error HTTP ${response.status}: ${response.statusText}`;
+      }
+    } catch (networkErr: any) {
+      // Offline or network unreachable - item will stay in offline queue
+      errorMessage = networkErr?.message || 'Sin conexión a la red de despacho';
+      console.warn('📡 [Oplira Dispatch] Modo offline o servidor no alcanzable temporalmente:', errorMessage);
     }
-    return true;
+
+    if (isDispatched) {
+      console.log('✅ [Supervisor Email Dispatcher] Transmisión exitosa al supervisor:', {
+        to: item.supervisorEmail,
+        worker: item.workerName,
+        hash: item.hashSha256,
+        timestamp: new Date().toISOString()
+      });
+
+      const refreshed = getSupervisorQueue();
+      const idx = refreshed.findIndex(i => i.id === itemId);
+      if (idx !== -1) {
+        refreshed[idx] = {
+          ...refreshed[idx],
+          syncStatus: 'synced',
+          syncedAt: new Date().toISOString(),
+          retryCount: refreshed[idx].retryCount + 1,
+          lastError: undefined
+        };
+        saveQueue(refreshed);
+      }
+      return true;
+    } else {
+      // Save as failed/pending for background automatic retry when online
+      const refreshed = getSupervisorQueue();
+      const idx = refreshed.findIndex(i => i.id === itemId);
+      if (idx !== -1) {
+        refreshed[idx] = {
+          ...refreshed[idx],
+          syncStatus: 'failed',
+          retryCount: refreshed[idx].retryCount + 1,
+          lastError: errorMessage
+        };
+        saveQueue(refreshed);
+      }
+      return false;
+    }
   } catch (err: any) {
     console.error('Failed to dispatch supervisor email:', err);
     const refreshed = getSupervisorQueue();

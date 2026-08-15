@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   FileText, 
@@ -37,7 +37,14 @@ export const MandatoryLegalConsentModal: React.FC<MandatoryLegalConsentModalProp
   const [checkPrivacy, setCheckPrivacy] = useState(false);
   const [checkDuty, setCheckDuty] = useState(false);
   const [understoodNonMedical, setUnderstoodNonMedical] = useState(false);
-  const [digitalSignature, setDigitalSignature] = useState(worker.name);
+  const [digitalSignature, setDigitalSignature] = useState(worker.name || '');
+
+  // Keep digital signature synchronized whenever worker profile updates or modal opens
+  useEffect(() => {
+    if (worker?.name) {
+      setDigitalSignature(worker.name);
+    }
+  }, [worker?.name, isOpen]);
 
   if (!isOpen) return null;
 
