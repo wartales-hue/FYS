@@ -23,11 +23,32 @@ import { Shield, CheckCircle2 } from 'lucide-react';
 import { MandatoryPersonalDataModal } from './components/MandatoryPersonalDataModal';
 import { MandatoryLegalConsentModal } from './components/MandatoryLegalConsentModal';
 import { fetchLiveWeatherFromCoords, getStoredWeatherForecast } from './lib/weatherService';
+import { initBackgroundSyncListeners, subscribeToQueue, drainSupervisorQueue, getPendingQueueCount } from './lib/supervisorSyncQueue';
 
 export default function App() {
   const [state, setState] = useState<OfflineState>(loadInitialState);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [workerViewMode, setWorkerViewMode] = useState<'dashboard' | 'checkin' | 'micropvt' | 'privacy' | 'personal_data'>('dashboard');
+
+  // Background sync listener for automatic offline supervisor email/PDF transmission
+  useEffect(() => {
+    const unsubQueue = subscribeToQueue((queue) => {
+      const pendingCount = queue.filter(q => q.syncStatus === 'pending' || q.syncStatus === 'failed').length;
+      setState(prev => ({
+        ...prev,
+        pendingSyncCount: pendingCount
+      }));
+    });
+
+    const cleanupSync = initBackgroundSyncListeners((syncedCount) => {
+      showToast(`✓ Conexión detectada: ${syncedCount} certificado(s) PDF transmitidos automáticamente al supervisor.`);
+    });
+
+    return () => {
+      unsubQueue();
+      if (cleanupSync) cleanupSync();
+    };
+  }, []);
 
   // Save state whenever it changes
   useEffect(() => {
@@ -120,15 +141,20 @@ export default function App() {
     showToast(`✓ Ficha personal y calibración de ${updatedWorker.name} actualizadas.`);
   };
 
-  const handleToggleOnline = () => {
-    setState(prev => {
-      const nextOnline = !prev.isOnline;
-      if (nextOnline && prev.pendingSyncCount > 0) {
-        showToast(`Sincronización completada: ${prev.pendingSyncCount} registros transmitidos con hash SHA-256.`);
-        return { ...prev, isOnline: true, pendingSyncCount: 0 };
+  const handleToggleOnline = async () => {
+    const nextOnline = !state.isOnline;
+    if (nextOnline) {
+      const syncedCount = await drainSupervisorQueue();
+      if (syncedCount > 0) {
+        showToast(`✓ Conexión online: ${syncedCount} certificados transmitidos al supervisor con hash SHA-256.`);
+      } else {
+        showToast('✓ Modo Online conectado.');
       }
-      return { ...prev, isOnline: nextOnline };
-    });
+      setState(prev => ({ ...prev, isOnline: true, pendingSyncCount: getPendingQueueCount() }));
+    } else {
+      setState(prev => ({ ...prev, isOnline: false }));
+      showToast('Modo Offline activado: Los reportes se guardarán en cola local.');
+    }
   };
 
   const handleToggleVehicleMoving = () => {
@@ -143,9 +169,14 @@ export default function App() {
     });
   };
 
-  const handleSyncNow = () => {
-    setState(prev => ({ ...prev, pendingSyncCount: 0 }));
-    showToast('✓ Cola de sincronización local transmitida al servidor central.');
+  const handleSyncNow = async () => {
+    const syncedCount = await drainSupervisorQueue();
+    setState(prev => ({ ...prev, pendingSyncCount: getPendingQueueCount() }));
+    if (syncedCount > 0) {
+      showToast(`✓ Sincronización exitosa: ${syncedCount} reporte(s) y PDF(s) transmitidos al supervisor.`);
+    } else {
+      showToast('✓ Cola de sincronización actualizada y verificada.');
+    }
   };
 
   const handleSaveEvaluation = (newEval: FRARiskEvaluation) => {

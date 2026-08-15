@@ -1,4 +1,7 @@
 import { jsPDF } from 'jspdf';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { WorkerProfile, FRARiskEvaluation, PVTSummary, SleepRecord } from '../types';
 import { LEVEL_CONTROL_MEASURES } from './controlMeasures';
 import { drawVectorGuillocheSecurityBackground } from './guillocheDrawer';
@@ -904,15 +907,189 @@ export function generateEvaluationPDF(
   return doc;
 }
 
-export function downloadEvaluationPDF(
+export function getPDFFileName(worker: WorkerProfile, evaluation: FRARiskEvaluation): string {
+  const cleanName = (worker.name || 'Trabajador').replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+  const dateStr = new Date(evaluation.timestamp).toISOString().split('T')[0];
+  return `FYS_HSEC_Oplira_Certificado_${cleanName}_${dateStr}.pdf`;
+}
+
+/**
+ * Robust multi-platform PDF Downloader & Saver
+ * Supports Native Android (Capacitor Filesystem), Web Browsers, Android WebViews / APKs, and Mobile Devices
+ */
+export async function downloadEvaluationPDF(
   worker: WorkerProfile,
   evaluation: FRARiskEvaluation,
   sleepRecord?: Partial<SleepRecord>,
   pvtSummary?: Partial<PVTSummary>
-) {
+): Promise<boolean> {
   const doc = generateEvaluationPDF(worker, evaluation, sleepRecord, pvtSummary);
-  const cleanName = (worker.name || 'Trabajador').replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
-  const dateStr = new Date(evaluation.timestamp).toISOString().split('T')[0];
-  const filename = `FYS_HSEC_Oplira_Certificado_${cleanName}_${dateStr}.pdf`;
-  doc.save(filename);
+  const filename = getPDFFileName(worker, evaluation);
+
+  try {
+    // 1. Check if running inside native Android / iOS app via Capacitor
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const base64Data = doc.output('datauristring').split(',')[1];
+        
+        // Write to Cache directory first for sharing / opening
+        const result = await Filesystem.writeFile({
+          path: filename,
+          data: base64Data,
+          directory: Directory.Cache
+        });
+
+        // Also write a copy to Documents / Download folder
+        try {
+          await Filesystem.writeFile({
+            path: filename,
+            data: base64Data,
+            directory: Directory.Documents
+          });
+        } catch (docErr) {
+          console.warn('Documents save note:', docErr);
+        }
+
+        // Open native Android Share/Save sheet
+        await Share.share({
+          title: 'Certificado Oficial Oplira FYS',
+          text: `Certificado HSEC para ${worker.name} (${worker.rut}) - ${evaluation.statusLabel.toUpperCase()}`,
+          url: result.uri,
+          dialogTitle: 'Guardar o Compartir Certificado PDF'
+        });
+
+        return true;
+      } catch (nativeErr) {
+        console.warn('Capacitor native PDF handling fallback:', nativeErr);
+      }
+    }
+
+    // 2. Standard Web Browser & Mobile Browser handling
+    const blob = doc.output('blob');
+
+    // Web Share API on mobile browsers
+    const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent || '');
+    if (isMobile && typeof navigator.share === 'function') {
+      try {
+        const file = new File([blob], filename, { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: 'Certificado Oficial Oplira FYS',
+            text: `Certificado HSEC de fatiga y somnolencia para ${worker.name} (${worker.rut}).`
+          });
+          return true;
+        }
+      } catch (shareErr: any) {
+        if (shareErr?.name !== 'AbortError') {
+          console.warn('Mobile native share fallback:', shareErr);
+        }
+      }
+    }
+
+    // 3. Fallback: Blob URL download for standard web
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 2000);
+
+    // Also trigger jsPDF internal save
+    doc.save(filename);
+    return true;
+  } catch (e) {
+    console.error('Error downloading PDF:', e);
+    doc.save(filename);
+    return false;
+  }
 }
+
+/**
+ * Opens the PDF directly in a new window or native PDF viewer
+ */
+export function openEvaluationPDFPreview(
+  worker: WorkerProfile,
+  evaluation: FRARiskEvaluation,
+  sleepRecord?: Partial<SleepRecord>,
+  pvtSummary?: Partial<PVTSummary>
+): string | null {
+  try {
+    const doc = generateEvaluationPDF(worker, evaluation, sleepRecord, pvtSummary);
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    return url;
+  } catch (e) {
+    console.error('Error opening PDF preview:', e);
+    return null;
+  }
+}
+
+/**
+ * Triggers native Android / iOS share dialog with the PDF file attached (WhatsApp, Drive, Gmail, etc.)
+ */
+export async function shareEvaluationPDFNative(
+  worker: WorkerProfile,
+  evaluation: FRARiskEvaluation,
+  sleepRecord?: Partial<SleepRecord>,
+  pvtSummary?: Partial<PVTSummary>
+): Promise<boolean> {
+  try {
+    const doc = generateEvaluationPDF(worker, evaluation, sleepRecord, pvtSummary);
+    const filename = getPDFFileName(worker, evaluation);
+
+    // If Capacitor native platform
+    if (Capacitor.isNativePlatform()) {
+      const base64Data = doc.output('datauristring').split(',')[1];
+      const result = await Filesystem.writeFile({
+        path: filename,
+        data: base64Data,
+        directory: Directory.Cache
+      });
+      await Share.share({
+        title: `Certificado FYS Oplira - ${worker.name}`,
+        text: `Informe HSEC (${evaluation.statusLabel.toUpperCase()}) para ${worker.name} (RUT: ${worker.rut}). Hash: ${evaluation.hashSha256}`,
+        url: result.uri,
+        dialogTitle: 'Compartir Certificado PDF'
+      });
+      return true;
+    }
+
+    // Web fallback
+    const blob = doc.output('blob');
+    const file = new File([blob], filename, { type: 'application/pdf' });
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Certificado FYS Oplira - ${worker.name}`,
+          text: `Informe de evaluación de aptitud y fatiga HSEC (${evaluation.statusLabel.toUpperCase()}). Código SHA-256: ${evaluation.hashSha256}`
+        });
+        return true;
+      } else {
+        await navigator.share({
+          title: `Certificado FYS Oplira - ${worker.name}`,
+          text: `Informe HSEC (${evaluation.statusLabel.toUpperCase()}) para ${worker.name} (RUT: ${worker.rut}). Verificado con hash: ${evaluation.hashSha256}`
+        });
+        return true;
+      }
+    }
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') {
+      console.warn('Native share failed, downloading instead:', e);
+    }
+  }
+
+  // Fallback to download
+  return downloadEvaluationPDF(worker, evaluation, sleepRecord, pvtSummary);
+}
+

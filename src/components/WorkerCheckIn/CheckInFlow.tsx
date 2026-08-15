@@ -41,11 +41,19 @@ import { InteractivePVT } from './InteractivePVT';
 import { FYSPreTurnSurveyComponent } from './FYSPreTurnSurveyComponent';
 import { SignaturePad } from './SignaturePad';
 import { evaluateFRARisk } from '../../lib/fraEngine';
-import { downloadEvaluationPDF } from '../../lib/pdfGenerator';
+import { downloadEvaluationPDF, shareEvaluationPDFNative, openEvaluationPDFPreview } from '../../lib/pdfGenerator';
+import { 
+  enqueueSupervisorDispatch, 
+  drainSupervisorQueue, 
+  getSupervisorQueue, 
+  openSupervisorEmailClient, 
+  shareSupervisorWhatsApp, 
+  PendingSupervisorDispatch 
+} from '../../lib/supervisorSyncQueue';
 import { LEVEL_CONTROL_MEASURES, ControlMeasureItem } from '../../lib/controlMeasures';
 import { OpliraLogo } from '../OpliraLogo';
 import { WeatherManualEditModal } from '../WeatherManualEditModal';
-import { Edit2, Thermometer, WifiOff } from 'lucide-react';
+import { Edit2, Thermometer, WifiOff, Share2, ExternalLink, RefreshCw, Send, Check } from 'lucide-react';
 
 interface CheckInFlowProps {
   worker: WorkerProfile;
@@ -145,9 +153,11 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   const [supervisorSignatureTime, setSupervisorSignatureTime] = useState<string>('');
   const [supervisorNotes, setSupervisorNotes] = useState<string>('Evaluación presencial verificada conforme a protocolo HSEC.');
 
-  // Step 8: Generated Evaluation & PDF Status
+  // Step 8: Generated Evaluation & PDF Status & Supervisor Dispatch
   const [evaluationResult, setEvaluationResult] = useState<FRARiskEvaluation | null>(null);
   const [pdfGenerated, setPdfGenerated] = useState<boolean>(false);
+  const [dispatchItem, setDispatchItem] = useState<PendingSupervisorDispatch | null>(null);
+  const [isSyncingSupervisor, setIsSyncingSupervisor] = useState<boolean>(false);
 
   const kssDescriptions = [
     { value: 1, label: 'Extremadamente alerta', desc: 'Máxima agudeza mental, sin fatiga.', color: 'border-emerald-500 text-emerald-400' },
@@ -240,7 +250,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     }
   };
 
-  const handleFinalizeSignaturesAndEmit = () => {
+  const handleFinalizeSignaturesAndEmit = async () => {
     if (!pvtSummary) return;
 
     // Prepare Sleep Record
@@ -271,16 +281,31 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     setEvaluationResult(finalEvaluation);
     setCurrentStep(8);
 
-    // Auto-generate and download official PDF with guilloché security background and signatures
+    // 1. Enqueue automatic supervisor transmission with offline persistence & auto-sync
     try {
-      downloadEvaluationPDF(evaluatedWorker, finalEvaluation, sleepRecord, pvtSummary);
+      const activeMeasures = (LEVEL_CONTROL_MEASURES[finalEvaluation.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+      const enqueued = await enqueueSupervisorDispatch(
+        evaluatedWorker,
+        finalEvaluation,
+        sleepRecord,
+        pvtSummary,
+        activeMeasures
+      );
+      setDispatchItem(enqueued);
+    } catch (err) {
+      console.warn('Supervisor dispatch enqueue note:', err);
+    }
+
+    // 2. Auto-generate and prepare official PDF with guilloché security background and signatures
+    try {
+      await downloadEvaluationPDF(evaluatedWorker, finalEvaluation, sleepRecord, pvtSummary);
       setPdfGenerated(true);
     } catch (e) {
       console.warn('PDF Auto-download note:', e);
     }
   };
 
-  const handleManualDownloadPDF = () => {
+  const handleManualDownloadPDF = async () => {
     if (evaluationResult) {
       const sleepRecord: SleepRecord = {
         sleepDurationHours: sleepHours,
@@ -292,8 +317,114 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
         accumulatedSleepDebtHours: Math.max(0, 8 - sleepHours),
         consecutiveNights,
       };
-      downloadEvaluationPDF(evaluatedWorker, evaluationResult, sleepRecord, pvtSummary || undefined);
+      await downloadEvaluationPDF(evaluatedWorker, evaluationResult, sleepRecord, pvtSummary || undefined);
       setPdfGenerated(true);
+    }
+  };
+
+  const handleNativeSharePDF = async () => {
+    if (evaluationResult) {
+      const sleepRecord: SleepRecord = {
+        sleepDurationHours: sleepHours,
+        sleepOpportunityHours: sleepOpportunity,
+        bedTime,
+        wakeTime,
+        sleepQuality,
+        timeSinceAwakeHours: 3.5,
+        accumulatedSleepDebtHours: Math.max(0, 8 - sleepHours),
+        consecutiveNights,
+      };
+      await shareEvaluationPDFNative(evaluatedWorker, evaluationResult, sleepRecord, pvtSummary || undefined);
+    }
+  };
+
+  const handlePreviewPDF = () => {
+    if (evaluationResult) {
+      const sleepRecord: SleepRecord = {
+        sleepDurationHours: sleepHours,
+        sleepOpportunityHours: sleepOpportunity,
+        bedTime,
+        wakeTime,
+        sleepQuality,
+        timeSinceAwakeHours: 3.5,
+        accumulatedSleepDebtHours: Math.max(0, 8 - sleepHours),
+        consecutiveNights,
+      };
+      openEvaluationPDFPreview(evaluatedWorker, evaluationResult, sleepRecord, pvtSummary || undefined);
+    }
+  };
+
+  const handleManualSupervisorSync = async () => {
+    setIsSyncingSupervisor(true);
+    try {
+      await drainSupervisorQueue();
+      const currentQueue = getSupervisorQueue();
+      if (evaluationResult) {
+        const updatedItem = currentQueue.find(q => q.evaluationId === evaluationResult.id);
+        if (updatedItem) {
+          setDispatchItem(updatedItem);
+        }
+      }
+    } finally {
+      setIsSyncingSupervisor(false);
+    }
+  };
+
+  const handleDirectSupervisorEmail = () => {
+    if (dispatchItem) {
+      openSupervisorEmailClient(dispatchItem);
+    } else if (evaluationResult) {
+      const activeMeasures = (LEVEL_CONTROL_MEASURES[evaluationResult.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+      const tempDispatch: PendingSupervisorDispatch = {
+        id: `temp_${Date.now()}`,
+        evaluationId: evaluationResult.id,
+        workerName: evaluatedWorker.name,
+        workerRut: evaluatedWorker.rut,
+        workerCompany: evaluatedWorker.company,
+        workerFaena: evaluatedWorker.faena,
+        workerRole: evaluatedWorker.role,
+        supervisorName: evaluatedWorker.supervisorName || 'Supervisor HSEC',
+        supervisorEmail: evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl',
+        timestamp: evaluationResult.timestamp,
+        status: evaluationResult.status,
+        statusLabel: evaluationResult.statusLabel,
+        riskScore: evaluationResult.riskScore,
+        hashSha256: evaluationResult.hashSha256,
+        recommendedAction: evaluationResult.recommendedAction,
+        measuresApplied: activeMeasures,
+        syncStatus: 'synced',
+        retryCount: 0
+      };
+      openSupervisorEmailClient(tempDispatch);
+    }
+  };
+
+  const handleDirectSupervisorWhatsApp = () => {
+    if (dispatchItem) {
+      shareSupervisorWhatsApp(dispatchItem);
+    } else if (evaluationResult) {
+      const activeMeasures = (LEVEL_CONTROL_MEASURES[evaluationResult.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+      const tempDispatch: PendingSupervisorDispatch = {
+        id: `temp_${Date.now()}`,
+        evaluationId: evaluationResult.id,
+        workerName: evaluatedWorker.name,
+        workerRut: evaluatedWorker.rut,
+        workerCompany: evaluatedWorker.company,
+        workerFaena: evaluatedWorker.faena,
+        workerRole: evaluatedWorker.role,
+        supervisorName: evaluatedWorker.supervisorName || 'Supervisor HSEC',
+        supervisorEmail: evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl',
+        timestamp: evaluationResult.timestamp,
+        status: evaluationResult.status,
+        statusLabel: evaluationResult.statusLabel,
+        riskScore: evaluationResult.riskScore,
+        hashSha256: evaluationResult.hashSha256,
+        recommendedAction: evaluationResult.recommendedAction,
+        measuresApplied: activeMeasures,
+        syncStatus: 'synced',
+        retryCount: 0
+      };
+      shareSupervisorWhatsApp(tempDispatch);
     }
   };
 
@@ -312,6 +443,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     setSupervisorSignatureTime('');
     setEvaluationResult(null);
     setPdfGenerated(false);
+    setDispatchItem(null);
   };
 
 
@@ -1177,38 +1309,138 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             </div>
           </div>
 
-          {/* Automatic PDF Status Bar */}
-          <div className="bg-slate-900 text-white p-3.5 rounded-xl flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <FileDown className="w-4 h-4 text-amber-400" />
-              <div>
-                <span className="font-bold block">Certificado PDF Oficial Oplira (Fondo Guilloché + Estructura Transparente)</span>
-                <span className="text-[10px] text-slate-300">
-                  {pdfGenerated ? 'Generado y descargado automáticamente' : 'Listo para descargar'}
-                </span>
+          {/* Multi-Platform PDF Action Hub */}
+          <div className="bg-slate-900 text-white p-4 rounded-xl space-y-3">
+            <div className="flex items-start justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
+                  <FileDown className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="font-bold text-sm text-white block">
+                    Certificado PDF Oficial Oplira (Fondo Guilloché + Trazabilidad SHA-256)
+                  </span>
+                  <span className="text-[11px] text-slate-300">
+                    {pdfGenerated ? 'Generado y listo para descargar o compartir en el teléfono' : 'Documento oficial con validez legal HSEC'}
+                  </span>
+                </div>
               </div>
             </div>
-            <button
-              id="download-evaluation-pdf-btn"
-              type="button"
-              onClick={handleManualDownloadPDF}
-              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg transition-colors flex items-center gap-1.5 text-xs shadow-xs cursor-pointer"
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              <span>Descargar PDF</span>
-            </button>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              <button
+                id="download-evaluation-pdf-btn"
+                type="button"
+                onClick={handleManualDownloadPDF}
+                className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-all flex items-center justify-center gap-2 text-xs shadow-xs cursor-pointer active:scale-98"
+                title="Descargar o guardar el archivo PDF en el almacenamiento del dispositivo"
+              >
+                <FileDown className="w-4 h-4" />
+                <span>Descargar PDF</span>
+              </button>
+
+              <button
+                id="share-evaluation-pdf-btn"
+                type="button"
+                onClick={handleNativeSharePDF}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer active:scale-98"
+                title="Compartir directo por WhatsApp, Google Drive o correo en el teléfono"
+              >
+                <Share2 className="w-4 h-4 text-emerald-400" />
+                <span>Compartir / Enviar</span>
+              </button>
+
+              <button
+                id="preview-evaluation-pdf-btn"
+                type="button"
+                onClick={handlePreviewPDF}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer active:scale-98"
+                title="Abrir vista previa del PDF en pantalla"
+              >
+                <ExternalLink className="w-4 h-4 text-sky-400" />
+                <span>Ver en Pantalla</span>
+              </button>
+            </div>
           </div>
 
-          {/* Supervisor Email Automatic Copy Notification */}
-          <div className="p-3.5 bg-sky-50 border border-sky-200 rounded-xl flex items-start gap-3 text-xs text-sky-950">
-            <Mail className="w-4 h-4 text-sky-700 flex-shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <span className="font-bold block text-[11px] text-sky-900">
-                Copia Certificada Enviada al Supervisor Directo:
-              </span>
-              <p className="text-[11px] text-sky-800">
-                Se registró y transmitió una copia certificada a <strong>{evaluatedWorker.supervisorName || 'Supervisor de Faena'}</strong> (<span className="font-mono text-sky-900">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span>).
-              </p>
+          {/* Supervisor Email & Automatic Offline Sync Queue Status */}
+          <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
+            dispatchItem?.syncStatus === 'synced'
+              ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
+              : 'bg-amber-50/90 border-amber-300 text-amber-950'
+          }`}>
+            <div className="flex items-start gap-3">
+              <div className={`p-2 rounded-lg ${
+                dispatchItem?.syncStatus === 'synced' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+              }`}>
+                {dispatchItem?.syncStatus === 'synced' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold block text-xs">
+                    {dispatchItem?.syncStatus === 'synced'
+                      ? '✓ Copia Certificada Despachada al Supervisor Directo'
+                      : '⏳ En Cola de Despacho Automático Offline'}
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    dispatchItem?.syncStatus === 'synced'
+                      ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                      : 'bg-amber-100 border-amber-300 text-amber-800'
+                  }`}>
+                    {dispatchItem?.syncStatus === 'synced' ? 'Enviado' : 'Pendiente Auto-Sync'}
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-90 leading-relaxed">
+                  {dispatchItem?.syncStatus === 'synced' ? (
+                    <>
+                      Se transmitió digitalmente a <strong>{evaluatedWorker.supervisorName || 'Supervisor de Faena'}</strong> (
+                      <span className="font-mono">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span>) con acuse de recepción y firma HSEC.
+                    </>
+                  ) : (
+                    <>
+                      El dispositivo se encuentra en zona sin cobertura o en espera de red. El PDF y reporte se <strong>enviarán automáticamente</strong> a <span className="font-mono">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span> en cuanto haya internet, sin necesidad de reabrir la app.
+                    </>
+                  )}
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleDirectSupervisorEmail}
+                    className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-800 font-bold rounded-lg border border-slate-300 transition-all flex items-center gap-1.5 text-[11px] cursor-pointer shadow-2xs"
+                    title="Abrir en Gmail o app de correo para enviar al supervisor"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-sky-600" />
+                    <span>Abrir en Correo (Gmail)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDirectSupervisorWhatsApp}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all flex items-center gap-1.5 text-[11px] cursor-pointer shadow-2xs"
+                    title="Enviar resumen inmediato al supervisor por WhatsApp"
+                  >
+                    <Share2 className="w-3.5 h-3.5 text-white" />
+                    <span>Enviar por WhatsApp</span>
+                  </button>
+
+                  {dispatchItem?.syncStatus !== 'synced' && (
+                    <button
+                      type="button"
+                      onClick={handleManualSupervisorSync}
+                      disabled={isSyncingSupervisor}
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                      title="Forzar intento de despacho manual"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupervisor ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingSupervisor ? 'Despachando...' : 'Reintentar Auto-Sync'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
