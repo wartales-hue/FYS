@@ -1,0 +1,6 @@
+{
+  "name": "FYS HSEC Oplira",
+  "description": "Plataforma FRMS Oplira para gestión integral del riesgo de fatiga y somnolencia operacional en minería e industria crítica. Certificación psicométrica, línea base individual, telemetría climática/GPS y reportabilidad PDF.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
