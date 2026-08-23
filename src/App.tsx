@@ -3,37 +3,68 @@ import { Header } from './components/Header';
 import { WorkerDashboard } from './components/WorkerDashboard/WorkerDashboard';
 import { SupervisorView } from './components/SupervisorDashboard/SupervisorView';
 import { HSECView } from './components/HSECDashboard/HSECView';
-import { OccupationalHealthView } from './components/HealthDashboard/OccupationalHealthView';
 import { GovernanceView } from './components/AlgorithmGovernance/GovernanceView';
 import { 
   UserRole, 
   WorkerProfile, 
   FRARiskEvaluation, 
-  InterventionRecord, 
-  StopBangRecord 
+  InterventionRecord
 } from './types';
 import { 
   MOCK_WORKERS, 
   MOCK_EVALUATIONS, 
-  MOCK_INTERVENTIONS, 
-  MOCK_STOP_BANG 
+  MOCK_INTERVENTIONS
 } from './lib/mockData';
-import { OfflineState, loadInitialState, saveStateToStorage } from './lib/offlineStore';
+import { OfflineState, loadInitialState, saveStateToStorage, resetAllDataToZero } from './lib/offlineStore';
 import { Shield, CheckCircle2 } from 'lucide-react';
 import { MandatoryPersonalDataModal } from './components/MandatoryPersonalDataModal';
 import { MandatoryLegalConsentModal } from './components/MandatoryLegalConsentModal';
+import { GooglePlaySubscriptionModal } from './components/GooglePlaySubscriptionModal';
+import { NonMedicalDisclaimerModal } from './components/GooglePlayCompliance/NonMedicalDisclaimerModal';
+import { GooglePlayPermissionsModal } from './components/GooglePlayCompliance/GooglePlayPermissionsModal';
+import { GooglePlayReviewerDemoModal } from './components/GooglePlayCompliance/GooglePlayReviewerDemoModal';
+import { MejorasComentariosModal } from './components/MejorasComentariosModal';
+import { AppInformationModal } from './components/AppInformationModal';
 import { fetchLiveWeatherFromCoords, getStoredWeatherForecast } from './lib/weatherService';
-import { initBackgroundSyncListeners, subscribeToQueue, drainSupervisorQueue, getPendingQueueCount } from './lib/supervisorSyncQueue';
+import { initBackgroundSyncListeners, subscribeToQueue, drainSupervisorQueue, forceSyncAll, getPendingQueueCount } from './lib/supervisorSyncQueue';
+import { initScreenSecurity, onSecurityAlert } from './lib/screenSecurity';
+import { checkDeviceSessionStatus } from './lib/premiumService';
+import { ShieldAlert } from 'lucide-react';
 
 export default function App() {
   const [state, setState] = useState<OfflineState>(loadInitialState);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [securityAlert, setSecurityAlert] = useState<string | null>(null);
   const [workerViewMode, setWorkerViewMode] = useState<'dashboard' | 'checkin' | 'micropvt' | 'privacy' | 'personal_data'>('dashboard');
+  const [isPremiumModalOpen, setIsPremiumModalOpen] = useState<boolean>(false);
+  const [isNonMedicalModalOpen, setIsNonMedicalModalOpen] = useState<boolean>(false);
+  const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState<boolean>(false);
+  const [isReviewerDemoModalOpen, setIsReviewerDemoModalOpen] = useState<boolean>(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState<boolean>(false);
+  const [isInformationModalOpen, setIsInformationModalOpen] = useState<boolean>(false);
+  const [isSyncingGlobal, setIsSyncingGlobal] = useState<boolean>(false);
+
+  // Screen security (anti-screenshot & data protection Ley 21.719)
+  useEffect(() => {
+    const cleanupSecurity = initScreenSecurity();
+    const unsubAlert = onSecurityAlert((msg) => {
+      setSecurityAlert(msg);
+      setTimeout(() => setSecurityAlert(null), 5000);
+    });
+
+    return () => {
+      cleanupSecurity();
+      unsubAlert();
+    };
+  }, []);
 
   // Background sync listener for automatic offline supervisor email/PDF transmission
   useEffect(() => {
+    // Initial clock sync ping
+    import('./lib/clockSync').then(m => m.syncClockWithBackend()).catch(() => {});
+
     const unsubQueue = subscribeToQueue((queue) => {
-      const pendingCount = queue.filter(q => q.syncStatus === 'pending' || q.syncStatus === 'failed').length;
+      const pendingCount = queue.filter(q => q.syncStatus === 'pending' || q.syncStatus === 'failed' || q.syncStatus === 'syncing').length;
       setState(prev => ({
         ...prev,
         pendingSyncCount: pendingCount
@@ -125,6 +156,13 @@ export default function App() {
     setWorkerViewMode('personal_data');
   };
 
+  const handleResetAllData = () => {
+    const clean = resetAllDataToZero();
+    setState(clean);
+    setWorkerViewMode('dashboard');
+    showToast('✓ Datos eliminados: Aplicación reiniciada para registrar nuevo trabajador.');
+  };
+
   const handleWorkerChange = (worker: WorkerProfile) => {
     setState(prev => ({ ...prev, selectedWorkerId: worker.id }));
   };
@@ -144,11 +182,16 @@ export default function App() {
   const handleToggleOnline = async () => {
     const nextOnline = !state.isOnline;
     if (nextOnline) {
-      const syncedCount = await drainSupervisorQueue();
-      if (syncedCount > 0) {
-        showToast(`✓ Conexión online: ${syncedCount} certificados transmitidos al supervisor con hash SHA-256.`);
-      } else {
-        showToast('✓ Modo Online conectado.');
+      setIsSyncingGlobal(true);
+      try {
+        const syncedCount = await forceSyncAll();
+        if (syncedCount > 0) {
+          showToast(`✓ Conexión online: ${syncedCount} certificados transmitidos al supervisor con hash SHA-256.`);
+        } else {
+          showToast('✓ Modo Online conectado.');
+        }
+      } finally {
+        setIsSyncingGlobal(false);
       }
       setState(prev => ({ ...prev, isOnline: true, pendingSyncCount: getPendingQueueCount() }));
     } else {
@@ -170,12 +213,18 @@ export default function App() {
   };
 
   const handleSyncNow = async () => {
-    const syncedCount = await drainSupervisorQueue();
-    setState(prev => ({ ...prev, pendingSyncCount: getPendingQueueCount() }));
-    if (syncedCount > 0) {
-      showToast(`✓ Sincronización exitosa: ${syncedCount} reporte(s) y PDF(s) transmitidos al supervisor.`);
-    } else {
-      showToast('✓ Cola de sincronización actualizada y verificada.');
+    setIsSyncingGlobal(true);
+    try {
+      const syncedCount = await forceSyncAll();
+      const newPending = getPendingQueueCount();
+      setState(prev => ({ ...prev, pendingSyncCount: newPending }));
+      if (syncedCount > 0) {
+        showToast(`✓ Sincronización exitosa: ${syncedCount} reporte(s) y certificado(s) transmitidos al supervisor.`);
+      } else {
+        showToast('✓ Cola de sincronización verificada: todos los reportes están al día.');
+      }
+    } finally {
+      setIsSyncingGlobal(false);
     }
   };
 
@@ -183,7 +232,7 @@ export default function App() {
     setState(prev => ({
       ...prev,
       evaluations: [newEval, ...prev.evaluations.filter(e => e.id !== newEval.id)],
-      pendingSyncCount: prev.isOnline ? prev.pendingSyncCount : prev.pendingSyncCount + 1,
+      pendingSyncCount: getPendingQueueCount(),
     }));
     const supervisorMsg = currentWorker.supervisorEmail 
       ? ` • Copia enviada a ${currentWorker.supervisorEmail}` 
@@ -195,7 +244,7 @@ export default function App() {
     setState(prev => ({
       ...prev,
       interventions: [newInt, ...prev.interventions],
-      pendingSyncCount: prev.isOnline ? prev.pendingSyncCount : prev.pendingSyncCount + 1,
+      pendingSyncCount: getPendingQueueCount(),
     }));
     showToast('✓ Medida preventiva despachada al operador y registrada en bitácora.');
   };
@@ -216,15 +265,6 @@ export default function App() {
       })
     }));
     showToast('✓ Estado de recuperación post-intervención actualizado.');
-  };
-
-  const handleSaveStopBang = (record: StopBangRecord) => {
-    setState(prev => ({
-      ...prev,
-      stopBangRecords: [record, ...prev.stopBangRecords.filter(r => r.workerId !== record.workerId)],
-      pendingSyncCount: prev.isOnline ? prev.pendingSyncCount : prev.pendingSyncCount + 1,
-    }));
-    showToast('✓ Evaluación médica STOP-BANG guardada en Base Clínica Segregada.');
   };
 
   const getLatestEvaluation = (workerId: string) => {
@@ -254,12 +294,53 @@ export default function App() {
     showToast(`✓ Documentos legales y consentimiento autorizado por ${consentDetails.signatureDigital}.`);
   };
 
+  const handleApplyReviewerDemo = (credentials: {
+    rut: string;
+    pin: string;
+    faena: string;
+    altitude: number;
+    workerName: string;
+  }) => {
+    const updatedWorker: WorkerProfile = {
+      ...currentWorker,
+      name: credentials.workerName,
+      rut: credentials.rut,
+      faena: credentials.faena,
+      altitudeMeters: credentials.altitude,
+      supervisorRut: '12080702-1',
+      supervisorName: 'Supervisor HSEC Autorizado (Google Play)',
+      supervisorEmail: 'wartales@gmail.com',
+      profileCompleted: true,
+      legalConsent: {
+        accepted: true,
+        timestamp: new Date().toISOString(),
+        acceptedTerms: true,
+        acceptedPrivacy: true,
+        acceptedDutyOfDisclosure: true,
+        signatureDigital: credentials.workerName
+      }
+    };
+    handleUpdateWorker(updatedWorker);
+    setState(prev => ({
+      ...prev,
+      currentRole: 'worker'
+    }));
+    showToast('✓ Entorno de Prueba Google Play cargado. Acceso completo y calibración habilitados.');
+  };
+
   // Sequential Gating: 1. Personal Data -> 2. Informed Consent -> 3. App / Evaluation
   const isProfilePending = !currentWorker.profileCompleted;
   const isConsentPending = currentWorker.profileCompleted && !currentWorker.legalConsent?.accepted;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-slate-800 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-slate-800 selection:text-white security-protected-screen select-none">
+      {/* Security Alert Toast (Anti-Screenshot / Ley 21.719 protection) */}
+      {securityAlert && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[9999] bg-rose-950/95 border-2 border-rose-500 text-white px-5 py-3 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-3 backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200 max-w-lg text-center">
+          <ShieldAlert className="w-5 h-5 text-rose-400 flex-shrink-0 animate-pulse" />
+          <span>{securityAlert}</span>
+        </div>
+      )}
       {/* 1. Mandatory Personal Data Modal (Step 1 Gatekeeper) */}
       <MandatoryPersonalDataModal
         isOpen={isProfilePending}
@@ -285,8 +366,59 @@ export default function App() {
         isVehicleMoving={state.isVehicleMoving}
         onToggleVehicleMoving={handleToggleVehicleMoving}
         pendingSyncCount={state.pendingSyncCount}
+        isSyncing={isSyncingGlobal}
         onSyncNow={handleSyncNow}
         onOpenPersonalData={handleOpenPersonalData}
+        onOpenFeedbackModal={() => setIsFeedbackModalOpen(true)}
+        onOpenInformationModal={() => setIsInformationModalOpen(true)}
+        onOpenPremiumModal={() => setIsPremiumModalOpen(true)}
+        onOpenNonMedicalModal={() => setIsNonMedicalModalOpen(true)}
+        onOpenPermissionsModal={() => setIsPermissionsModalOpen(true)}
+        onOpenReviewerDemoModal={() => setIsReviewerDemoModalOpen(true)}
+        onResetData={handleResetAllData}
+      />
+
+      {/* Centro de Información & Base Científica Oplira */}
+      <AppInformationModal
+        isOpen={isInformationModalOpen}
+        onClose={() => setIsInformationModalOpen(false)}
+      />
+
+      {/* Buzón Oficial de Mejoras, Reclamos y Comentarios (Ley 21.719 / Trazabilidad) */}
+      <MejorasComentariosModal
+        isOpen={isFeedbackModalOpen}
+        onClose={() => setIsFeedbackModalOpen(false)}
+        currentUser={currentWorker}
+        currentRole={state.currentRole}
+      />
+
+      {/* Google Play Store Premium Modal */}
+      <GooglePlaySubscriptionModal
+        isOpen={isPremiumModalOpen}
+        onClose={() => setIsPremiumModalOpen(false)}
+        initialRut={currentWorker.rut || currentWorker.supervisorRut}
+        onSuccess={() => {
+          showToast('✓ Cuenta Premium activada y vinculada a este dispositivo.');
+        }}
+      />
+
+      {/* Non-Medical Disclaimer Modal (Google Play Health Policy) */}
+      <NonMedicalDisclaimerModal
+        isOpen={isNonMedicalModalOpen}
+        onClose={() => setIsNonMedicalModalOpen(false)}
+      />
+
+      {/* Permissions Transparency Modal (Foreground Location & Zero Audio) */}
+      <GooglePlayPermissionsModal
+        isOpen={isPermissionsModalOpen}
+        onClose={() => setIsPermissionsModalOpen(false)}
+      />
+
+      {/* Google Play Reviewer Demo Modal */}
+      <GooglePlayReviewerDemoModal
+        isOpen={isReviewerDemoModalOpen}
+        onClose={() => setIsReviewerDemoModalOpen(false)}
+        onApplyReviewerDemo={handleApplyReviewerDemo}
       />
 
       {/* Main Role Content Container */}
@@ -326,16 +458,8 @@ export default function App() {
           />
         )}
 
-        {state.currentRole === 'health' && (
-          <OccupationalHealthView
-            workers={workersList}
-            stopBangRecords={state.stopBangRecords}
-            onSaveStopBang={handleSaveStopBang}
-          />
-        )}
-
         {state.currentRole === 'admin' && (
-          <GovernanceView />
+          <GovernanceView onOpenReviewerDemoModal={() => setIsReviewerDemoModalOpen(true)} />
         )}
       </main>
 
@@ -354,9 +478,18 @@ export default function App() {
             <Shield className="w-4 h-4 text-slate-700" />
             <span className="font-bold text-slate-800">FRA-HSEC v2.0</span>
             <span className="hidden sm:inline">•</span>
-            <span className="text-[11px] text-slate-500 hidden sm:inline">Sistema de Gestión del Riesgo de Fatiga Operacional (FRMS)</span>
+            <span className="text-[11px] text-slate-500 hidden sm:inline">Sistema de Gestión de Fatiga y Somnolencia (SGFS / F&S)</span>
           </div>
           <div className="text-[11px] text-slate-500 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsFeedbackModalOpen(true)}
+              className="text-slate-700 hover:text-blue-600 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <span className="text-amber-500">💬</span>
+              <span>Buzón de Mejoras y Comentarios</span>
+            </button>
+            <span>•</span>
             <span>Cumplimiento Ley 21.719</span>
             <span>•</span>
             <span>DS 44 / OHSAS Minería</span>

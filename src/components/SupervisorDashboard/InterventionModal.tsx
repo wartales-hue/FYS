@@ -72,10 +72,15 @@ export const InterventionModal: React.FC<InterventionModalProps> = ({
         {/* Header */}
         <div className="flex items-start justify-between border-b border-slate-100 pb-3">
           <div>
-            <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider block">
-              Gestión Operacional Preventiva
-            </span>
-            <h3 className="text-base font-bold text-slate-900">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-amber-600 uppercase tracking-wider block">
+                Gestión Operacional Preventiva
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold border border-amber-300">
+                ⚡ Próximamente
+              </span>
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mt-0.5">
               Registrar Medida Preventiva: {worker.name}
             </h3>
             <p className="text-xs text-slate-500">
@@ -90,14 +95,19 @@ export const InterventionModal: React.FC<InterventionModalProps> = ({
           </button>
         </div>
 
-        {/* Operational Context Warning */}
-        <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 text-xs space-y-1 text-amber-900">
-          <div className="flex items-center gap-1.5 font-semibold text-amber-800">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-            <span>Objetivo Preventivo:</span>
+        {/* Premium Feature Notice */}
+        <div className="bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-blue-500/10 p-3 rounded-xl border border-amber-300 text-xs space-y-1 text-slate-800">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
+              <Shield className="w-4 h-4 text-amber-600" />
+              Módulo de Despacho Operacional Premium (Próximamente)
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">
+              Oplira Pro
+            </span>
           </div>
-          <p className="text-[11px] text-amber-800 leading-relaxed">
-            Las medidas preventivas buscan restablecer la vigilancia psicomotora de forma anticipada. Toda medida ejecutada requerirá reevaluación posterior para verificar la recuperación.
+          <p className="text-[11.5px] text-slate-600 leading-relaxed">
+            El despacho digital automático de medidas preventivas en tiempo real a casetas de control y domos de descanso se habilitará en las próximas versiones de Oplira Pro. Puedes probar la interfaz de registro preventivo a continuación en modo demostración.
           </p>
         </div>
 

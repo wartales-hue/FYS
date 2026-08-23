@@ -28,6 +28,9 @@ import { OpliraLogo } from './OpliraLogo';
 import { validateRut, formatRut, cleanRut } from '../lib/rutValidator';
 import { RutErrorModal } from './RutErrorModal';
 import { InteractivePVT } from './WorkerCheckIn/InteractivePVT';
+import { isSupervisorPaid, getAllSupervisors, findSupervisorByCode } from '../lib/supervisorCrewManager';
+import { isAuthorizedSupervisorRut, isPremiumActive, registerSupervisorRutAsPremium } from '../lib/premiumService';
+import { GooglePlaySubscriptionModal } from './GooglePlaySubscriptionModal';
 
 interface MandatoryPersonalDataModalProps {
   isOpen: boolean;
@@ -46,31 +49,32 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
   // Form State
   const [name, setName] = useState(worker.name || '');
   const [rut, setRut] = useState(worker.rut || '');
-  const [company, setCompany] = useState(worker.company || 'Minera Los Andes');
-  const [role, setRole] = useState(worker.role || 'Operador CAEX');
-  const [equipmentAssigned, setEquipmentAssigned] = useState(worker.equipmentAssigned || 'CAEX #42');
-  const [faena, setFaena] = useState(worker.faena || 'Faena Cordillera Sur');
-  const [altitudeMeters, setAltitudeMeters] = useState(worker.altitudeMeters || 3800);
-  const [birthDate, setBirthDate] = useState(worker.birthDate || '1988-06-15');
+  const [company, setCompany] = useState(worker.company || '');
+  const [role, setRole] = useState(worker.role || '');
+  const [equipmentAssigned, setEquipmentAssigned] = useState(worker.equipmentAssigned || '');
+  const [faena, setFaena] = useState(worker.faena || '');
+  const [altitudeMeters, setAltitudeMeters] = useState(worker.altitudeMeters || 0);
+  const [birthDate, setBirthDate] = useState(worker.birthDate || '');
   const [gender, setGender] = useState<'Masculino' | 'Femenino' | 'Otro'>(worker.gender || 'Masculino');
-  const [supervisorName, setSupervisorName] = useState(worker.supervisorName || 'Carlos Henríquez');
-  const [supervisorEmail, setSupervisorEmail] = useState(worker.supervisorEmail || 'supervisor.faena@minera.cl');
+  const [supervisorName, setSupervisorName] = useState(worker.supervisorName || '');
+  const [supervisorEmail, setSupervisorEmail] = useState(worker.supervisorEmail || '');
+  const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
   
   // Shift Pattern and Habitual Shift Type
-  const [shiftPattern, setShiftPattern] = useState<string>(worker.shiftPattern || worker.currentShift?.rosterPattern || '7x7');
+  const [shiftPattern, setShiftPattern] = useState<string>(worker.shiftPattern || worker.currentShift?.rosterPattern || '4x4');
   const [habitualShiftType, setHabitualShiftType] = useState<'day' | 'night' | 'rotative'>(
     worker.habitualShiftType || (worker.currentShift?.type === 'night' ? 'night' : 'day')
   );
 
   // Baseline Calibration State
   const [baselineData, setBaselineData] = useState(worker.baseline || {
-    meanRT: 240,
-    medianRT: 235,
-    standardDeviation: 22,
-    fastest10Percent: 205,
-    lapseThresholdMs: 500,
-    validTrialsCount: 5,
-    lastUpdated: new Date().toISOString().split('T')[0]
+    meanRT: 0,
+    medianRT: 0,
+    standardDeviation: 0,
+    fastest10Percent: 0,
+    lapseThresholdMs: 650,
+    validTrialsCount: 0,
+    lastUpdated: ''
   });
   const [hasCalibratedInSession, setHasCalibratedInSession] = useState(false);
   const [calibrationSuccessMsg, setCalibrationSuccessMsg] = useState<string | null>(null);
@@ -79,20 +83,22 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
   const [showRutErrorModal, setShowRutErrorModal] = useState(false);
   const [rutErrorMessage, setRutErrorMessage] = useState('');
 
+  const isUserPremiumSupervisor = isAuthorizedSupervisorRut(rut) || isPremiumActive(rut);
+
   useEffect(() => {
     if (worker) {
       setName(worker.name || '');
       setRut(worker.rut || '');
-      setCompany(worker.company || 'Minera Los Andes');
-      setRole(worker.role || 'Operador CAEX');
-      setEquipmentAssigned(worker.equipmentAssigned || 'CAEX #42');
-      setFaena(worker.faena || 'Faena Cordillera Sur');
-      setAltitudeMeters(worker.altitudeMeters || 3800);
-      setBirthDate(worker.birthDate || '1988-06-15');
+      setCompany(worker.company || '');
+      setRole(worker.role || '');
+      setEquipmentAssigned(worker.equipmentAssigned || '');
+      setFaena(worker.faena || '');
+      setAltitudeMeters(worker.altitudeMeters || 0);
+      setBirthDate(worker.birthDate || '');
       setGender(worker.gender || 'Masculino');
-      setSupervisorName(worker.supervisorName || 'Carlos Henríquez');
-      setSupervisorEmail(worker.supervisorEmail || 'supervisor.faena@minera.cl');
-      setShiftPattern(worker.shiftPattern || '7x7');
+      setSupervisorName(worker.supervisorName || '');
+      setSupervisorEmail(worker.supervisorEmail || '');
+      setShiftPattern(worker.shiftPattern || worker.currentShift?.rosterPattern || '4x4');
       setHabitualShiftType(worker.habitualShiftType || 'day');
       if (worker.baseline) {
         setBaselineData(worker.baseline);
@@ -109,7 +115,13 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
         setRutErrorMessage(rutCheck.message || 'El RUT ingresado no es válido según el algoritmo Módulo 11.');
         setShowRutErrorModal(true);
       } else {
-        setRut(formatRut(rut));
+        const formatted = formatRut(rut);
+        setRut(formatted);
+        if (isAuthorizedSupervisorRut(formatted)) {
+          registerSupervisorRutAsPremium(formatted);
+          if (!supervisorName) setSupervisorName('Supervisor HSEC');
+          if (!supervisorEmail) setSupervisorEmail('supervisor.hsec@faenaminera.cl');
+        }
       }
     }
   };
@@ -131,14 +143,18 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
       return;
     }
 
-    setRut(formatRut(rut));
+    const formatted = formatRut(rut);
+    setRut(formatted);
+    if (isAuthorizedSupervisorRut(formatted)) {
+      registerSupervisorRutAsPremium(formatted);
+    }
     setCurrentStep(2);
   };
 
   // Callback when worker completes the PVT calibration in Step 2
   const handlePvtCalibrationComplete = (summary: PVTSummary) => {
-    if (summary.validTrials < 2) {
-      setCalibrationSuccessMsg('Prueba incompleta. Se requieren al menos 2 ensayos válidos.');
+    if (summary.validTrials < 3) {
+      setCalibrationSuccessMsg('Prueba incompleta. Se requieren al menos 3 ensayos válidos de 5 intentos.');
       return;
     }
 
@@ -154,12 +170,18 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
 
     setBaselineData(updated);
     setHasCalibratedInSession(true);
-    setCalibrationSuccessMsg(`✓ Línea base calibrada: ${summary.meanRT} ms (${summary.validTrials} ensayos válidos).`);
+    setCalibrationSuccessMsg(`✓ Línea base calibrada: ${summary.meanRT} ms (${summary.validTrials} de ${summary.totalTrials} ensayos válidos).`);
     setTimeout(() => setCalibrationSuccessMsg(null), 6000);
   };
 
-  // Final submit after Step 2
+  // Final submit after Step 2 (strictly blocked if PVT baseline has not been calibrated)
   const handleFinalSaveAndProceed = () => {
+    const isBaselineReady = hasCalibratedInSession || (baselineData.meanRT > 0 && (baselineData.validTrialsCount || 0) >= 4);
+    if (!isBaselineReady) {
+      alert('Es obligatorio completar los 5 intentos de la prueba de Línea Base PVT antes de guardar su ficha.');
+      return;
+    }
+
     const formattedRutStr = formatRut(rut);
     const cleanedRutStr = cleanRut(rut);
     const cleanedOldRut = cleanRut(worker.rut || '');
@@ -182,6 +204,8 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
       gender,
       supervisorName: supervisorName.trim(),
       supervisorEmail: supervisorEmail.trim().toLowerCase(),
+      supervisorCode: worker.supervisorCode || '',
+      supervisorRut: worker.supervisorRut || '',
       shiftPattern,
       habitualShiftType,
       baseline: baselineData,
@@ -380,14 +404,14 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
                   {/* Faena */}
                   <div className="space-y-1.5">
                     <label className="font-bold text-slate-800 block">
-                      Faena Minera:
+                      Faena o Lugar de trabajo:
                     </label>
                     <input
                       type="text"
                       value={faena}
                       onChange={(e) => setFaena(e.target.value)}
                       placeholder="Ej: Faena Cordillera Sur"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
                     />
                   </div>
 
@@ -423,17 +447,30 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
 
                 {/* Supervisor Information Section */}
                 <div className="p-3.5 bg-sky-50/80 border border-sky-200 rounded-xl space-y-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
                       <Mail className="w-3.5 h-3.5 text-sky-700" />
                       Notificación Automática al Supervisor Directo
                     </span>
-                    <span className="text-[10px] bg-sky-200/80 text-sky-800 font-semibold px-2 py-0.5 rounded-full">
-                      Copia Oficial PDF
-                    </span>
+                    {isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode) ? (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                        Versión Premium del Supervisor Activa
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowPremiumModal(true)}
+                        className="text-[10px] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold px-2.5 py-1 rounded-full shadow-2xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-300" />
+                        <span>Convierte a Premium ($0.99 USD/mes)</span>
+                      </button>
+                    )}
                   </div>
                   <p className="text-[11px] text-sky-800 leading-relaxed">
-                    Al finalizar cada evaluación pre-turno, se remitirá automáticamente una copia oficial del certificado y dictamen al correo del supervisor registrado aquí.
+                    {isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode)
+                      ? "Al finalizar cada evaluación pre-turno, se remitirá automáticamente una copia oficial del certificado y dictamen al correo del supervisor registrado."
+                      : "El apartado de email del supervisor y el envío automático están habilitados para versión premium del supervisor. En la versión gratuita de trabajador puedes evaluar y descargar tu certificado PDF con firma digital directamente."}
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                     <div className="space-y-1">
@@ -455,11 +492,15 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
                       </label>
                       <input
                         type="email"
-                        value={supervisorEmail}
-                        onChange={(e) => setSupervisorEmail(e.target.value)}
-                        placeholder="Ej: supervisor.faena@minera.cl"
-                        required
-                        className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                        value={isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode) ? supervisorEmail : ''}
+                        onChange={(e) => (isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode)) && setSupervisorEmail(e.target.value)}
+                        placeholder={isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode) ? "Ej: supervisor.faena@minera.cl" : "Disponible para versión premium del supervisor"}
+                        disabled={!(isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode))}
+                        className={`w-full px-3 py-2 rounded-xl border text-xs transition-colors ${
+                          isUserPremiumSupervisor || isSupervisorPaid(worker.supervisorCode)
+                            ? 'border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-medium'
+                            : 'border-slate-300 bg-slate-100 text-slate-400 cursor-not-allowed italic'
+                        }`}
                       />
                     </div>
                   </div>
@@ -547,10 +588,10 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
                     <Zap className="w-4 h-4 text-amber-500" />
-                    Prueba Psicomotriz PVT (3 Ensayos de Reacción)
+                    Prueba Psicomotriz PVT (5 Ensayos de Reacción Obligatorios)
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    Toca la pantalla apenas aparezcan los números rojos
+                    Toca la pantalla apenas aparezcan los números rojos (5 intentos)
                   </span>
                 </div>
 
@@ -581,10 +622,15 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
                   id="finalize-mandatory-onboarding-btn"
                   type="button"
                   onClick={handleFinalSaveAndProceed}
-                  className="w-full sm:flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                  disabled={!hasCalibratedInSession && !(baselineData.meanRT > 0 && (baselineData.validTrialsCount || 0) >= 4)}
+                  className="w-full sm:flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <CheckCircle2 className="w-4 h-4 text-white" />
-                  <span>Guardar Ficha y Continuar al Consentimiento Legal</span>
+                  <span>
+                    {hasCalibratedInSession || (baselineData.meanRT > 0 && (baselineData.validTrialsCount || 0) >= 4)
+                      ? 'Guardar Ficha y Continuar al Consentimiento Legal'
+                      : 'Debe Completar los 5 Intentos PVT para Continuar'}
+                  </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -599,6 +645,17 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
         onClose={() => setShowRutErrorModal(false)}
         rutEntered={rut}
         errorMessage={rutErrorMessage}
+      />
+
+      {/* Google Play Subscription Modal */}
+      <GooglePlaySubscriptionModal
+        isOpen={showPremiumModal}
+        onClose={() => setShowPremiumModal(false)}
+        initialRut={rut}
+        onSuccess={() => {
+          if (!supervisorName) setSupervisorName('Supervisor HSEC');
+          if (!supervisorEmail) setSupervisorEmail('supervisor.hsec@faenaminera.cl');
+        }}
       />
     </>
   );

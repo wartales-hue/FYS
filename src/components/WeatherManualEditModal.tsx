@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WeatherData, WeatherForecastDay } from '../types';
 import { Thermometer, Mountain, MapPin, CloudSun, Wind, Droplets, Sun, Gauge, RefreshCw, AlertCircle, Save } from 'lucide-react';
 import { fetchLiveWeatherFromCoords, saveWeatherToStorage } from '../lib/weatherService';
+import { DEFAULT_SAMPLE_WEATHER } from '../lib/mockData';
 
 interface WeatherManualEditModalProps {
-  currentWeather: WeatherData;
+  currentWeather?: WeatherData | null;
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedWeather: WeatherData) => void;
@@ -16,21 +17,41 @@ export const WeatherManualEditModal: React.FC<WeatherManualEditModalProps> = ({
   onClose,
   onSave
 }) => {
-  const firstDay = currentWeather.forecast?.[0];
+  const activeWeather = currentWeather || DEFAULT_SAMPLE_WEATHER;
+  const firstDay = activeWeather?.forecast?.[0] || DEFAULT_SAMPLE_WEATHER.forecast[0];
 
-  const [faenaName, setFaenaName] = useState(currentWeather.faenaName || 'Faena Operacional');
-  const [altitudeMeters, setAltitudeMeters] = useState(currentWeather.altitudeMeters || 1240);
-  const [temperatureC, setTemperatureC] = useState(firstDay?.currentTempC ?? 21);
+  const [faenaName, setFaenaName] = useState(activeWeather?.faenaName || 'Faena Operacional');
+  const [altitudeMeters, setAltitudeMeters] = useState(activeWeather?.altitudeMeters || 0);
+  const [temperatureC, setTemperatureC] = useState(firstDay?.currentTempC ?? 20);
   const [thermalSensationC, setThermalSensationC] = useState(firstDay?.thermalSensationC ?? 20);
-  const [tempMinC, setTempMinC] = useState(firstDay?.tempMinC ?? 14);
+  const [tempMinC, setTempMinC] = useState(firstDay?.tempMinC ?? 15);
   const [tempMaxC, setTempMaxC] = useState(firstDay?.tempMaxC ?? 25);
-  const [windSpeedKmh, setWindSpeedKmh] = useState(firstDay?.windSpeedKmh ?? 15);
-  const [humidityPercent, setHumidityPercent] = useState(firstDay?.humidityPercent ?? 35);
-  const [uvIndex, setUvIndex] = useState(firstDay?.uvIndex ?? (altitudeMeters >= 3000 ? 10 : 6));
-  const [condition, setCondition] = useState(firstDay?.condition || 'Despejado / Templado');
+  const [windSpeedKmh, setWindSpeedKmh] = useState(firstDay?.windSpeedKmh ?? 10);
+  const [humidityPercent, setHumidityPercent] = useState(firstDay?.humidityPercent ?? 40);
+  const [uvIndex, setUvIndex] = useState(firstDay?.uvIndex ?? 5);
+  const [condition, setCondition] = useState(firstDay?.condition || 'Despejado');
   
   const [gpsSyncLoading, setGpsSyncLoading] = useState(false);
   const [gpsSyncError, setGpsSyncError] = useState<string | null>(null);
+
+  // Sync state whenever modal opens or currentWeather changes
+  useEffect(() => {
+    if (isOpen) {
+      const src = currentWeather || DEFAULT_SAMPLE_WEATHER;
+      const f0 = src?.forecast?.[0] || DEFAULT_SAMPLE_WEATHER.forecast[0];
+      setFaenaName(src?.faenaName || 'Faena Operacional');
+      setAltitudeMeters(src?.altitudeMeters || 0);
+      setTemperatureC(f0?.currentTempC ?? 20);
+      setThermalSensationC(f0?.thermalSensationC ?? 20);
+      setTempMinC(f0?.tempMinC ?? 15);
+      setTempMaxC(f0?.tempMaxC ?? 25);
+      setWindSpeedKmh(f0?.windSpeedKmh ?? 10);
+      setHumidityPercent(f0?.humidityPercent ?? 40);
+      setUvIndex(f0?.uvIndex ?? 5);
+      setCondition(f0?.condition || 'Despejado');
+      setGpsSyncError(null);
+    }
+  }, [isOpen, currentWeather]);
 
   if (!isOpen) return null;
 
@@ -113,8 +134,8 @@ export const WeatherManualEditModal: React.FC<WeatherManualEditModalProps> = ({
     };
 
     const updatedData: WeatherData = {
-      latitude: currentWeather.latitude,
-      longitude: currentWeather.longitude,
+      latitude: activeWeather?.latitude ?? 0,
+      longitude: activeWeather?.longitude ?? 0,
       altitudeMeters: Number(altitudeMeters),
       faenaName,
       isGpsConnected: false,

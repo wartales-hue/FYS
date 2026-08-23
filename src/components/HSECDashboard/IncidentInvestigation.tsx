@@ -49,7 +49,7 @@ export const IncidentInvestigation: React.FC = () => {
           </span>
         </div>
         <p className="text-xs text-slate-700 leading-relaxed">
-          <strong>Descripción del Evento:</strong> Durante el acarreo nocturno de lastre en rampa botadero norte, el camión CAEX #42 rozó levemente el pretil de seguridad a 18 km/h. No hubo lesionados ni daño estructural. Se activó protocolo de investigación forense FRMS.
+          <strong>Descripción del Evento:</strong> Durante el acarreo nocturno de lastre en rampa botadero norte, el camión CAEX #42 rozó levemente el pretil de seguridad a 18 km/h. No hubo lesionados ni daño estructural. Se activó protocolo de investigación forense SGFS.
         </p>
       </div>
 
@@ -132,7 +132,7 @@ export const IncidentInvestigation: React.FC = () => {
         </div>
       </div>
 
-      {/* Root Cause Conclusion for FRMS */}
+      {/* Root Cause Conclusion for SGFS */}
       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
         <span className="font-bold text-emerald-800 block flex items-center gap-1.5">
           <CheckCircle className="w-4 h-4 text-emerald-600" />
@@ -140,7 +140,7 @@ export const IncidentInvestigation: React.FC = () => {
         </span>
         <p className="text-slate-700 leading-relaxed">
           La causa raíz se debió a la confluencia de deuda acumulada de sueño (noche 6) en gran altitud y el nadir circadiano (04:00 hrs). 
-          <strong> Acción correctiva FRMS:</strong> Se adelanta la pausa activa obligatoria de flota a las 03:30 hrs y se incorpora el protocolo de siesta controlada de 25 min para operadores en su 5ª y 6ª noche de turno.
+          <strong> Acción correctiva SGFS:</strong> Se adelanta la pausa activa obligatoria de flota a las 03:30 hrs y se incorpora el protocolo de siesta controlada de 25 min para operadores en su 5ª y 6ª noche de turno.
         </p>
       </div>
     </div>

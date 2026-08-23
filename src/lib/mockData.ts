@@ -1,388 +1,89 @@
-import { WorkerProfile, FRARiskEvaluation, InterventionRecord, StopBangRecord, AlgorithmVersionLog, WeatherData } from '../types';
+import { WorkerProfile, FRARiskEvaluation, InterventionRecord, AlgorithmVersionLog, WeatherData } from '../types';
 
 export const DEFAULT_SAMPLE_WEATHER: WeatherData = {
-  latitude: -23.8647,
-  longitude: -69.0438,
-  altitudeMeters: 1240,
-  faenaName: 'Faena Barreal Seco (1.240 msnm)',
-  isGpsConnected: true,
-  lastUpdated: '14-Ago-2026 11:30',
+  latitude: 0,
+  longitude: 0,
+  altitudeMeters: 0,
+  faenaName: 'Faena Operacional',
+  isGpsConnected: false,
+  lastUpdated: '',
   forecast: [
     {
       dayLabel: 'Hoy (Día 0)',
-      date: '2026-08-14',
-      tempMinC: 14,
-      tempMaxC: 25,
-      currentTempC: 21,
-      thermalSensationC: 20,
-      condition: 'Despejado / Templado',
-      windSpeedKmh: 14,
-      windGustsKmh: 22,
-      uvIndex: 7,
-      humidityPercent: 38,
-      barometricPressureHpa: 895,
-      hypoxiaRiskLevel: 'Baja',
-      fatigueWeatherImpactScore: 2
-    },
-    {
-      dayLabel: 'Mañana (+1 Día)',
-      date: '2026-08-15',
-      tempMinC: 13,
-      tempMaxC: 26,
-      currentTempC: 22,
-      thermalSensationC: 21,
-      condition: 'Despejado',
-      windSpeedKmh: 12,
-      windGustsKmh: 18,
-      uvIndex: 7,
-      humidityPercent: 35,
-      barometricPressureHpa: 896,
-      hypoxiaRiskLevel: 'Baja',
-      fatigueWeatherImpactScore: 2
-    },
-    {
-      dayLabel: 'Pasado Mañana (+2 Días)',
-      date: '2026-08-16',
+      date: new Date().toISOString().split('T')[0],
       tempMinC: 15,
-      tempMaxC: 27,
-      currentTempC: 23,
-      thermalSensationC: 22,
+      tempMaxC: 25,
+      currentTempC: 20,
+      thermalSensationC: 20,
       condition: 'Despejado',
-      windSpeedKmh: 15,
-      windGustsKmh: 24,
-      uvIndex: 8,
-      humidityPercent: 32,
-      barometricPressureHpa: 894,
+      windSpeedKmh: 10,
+      windGustsKmh: 15,
+      uvIndex: 5,
+      humidityPercent: 40,
+      barometricPressureHpa: 1013,
       hypoxiaRiskLevel: 'Baja',
-      fatigueWeatherImpactScore: 2
+      fatigueWeatherImpactScore: 1
     }
   ]
 };
 
+export const DEFAULT_EMPTY_WORKER: WorkerProfile = {
+  id: 'w-default',
+  rut: '',
+  name: '',
+  birthDate: '',
+  gender: 'Masculino',
+  company: '',
+  role: '',
+  area: '',
+  faena: '',
+  altitudeMeters: 0,
+  equipmentAssigned: '',
+  criticality: 1,
+  gpsEnabled: false,
+  weather: undefined,
+  supervisorName: '',
+  supervisorEmail: '',
+  supervisorRut: '',
+  supervisorCode: '',
+  shiftPattern: '4x4',
+  habitualShiftType: 'day',
+  currentShift: {
+    type: 'day',
+    dayInRoster: 1,
+    totalRosterDays: 4,
+    shiftStart: '08:00',
+    shiftEnd: '20:00',
+    rosterPattern: '4x4'
+  },
+  baseline: {
+    meanRT: 0,
+    medianRT: 0,
+    standardDeviation: 0,
+    fastest10Percent: 0,
+    lapseThresholdMs: 650,
+    validTrialsCount: 0,
+    lastUpdated: ''
+  },
+  chronotype: 'intermediate',
+  profileCompleted: false,
+  legalConsent: {
+    accepted: false,
+    timestamp: '',
+    acceptedTerms: false,
+    acceptedPrivacy: false,
+    acceptedDutyOfDisclosure: false,
+    signatureDigital: ''
+  }
+};
+
 export const MOCK_WORKERS: WorkerProfile[] = [
-  {
-    id: 'w-101',
-    rut: '14.892.415-3',
-    name: 'Alejandro Morales',
-    birthDate: '1982-04-18',
-    gender: 'Masculino',
-    company: 'Minera Los Andes',
-    role: 'Operador CAEX Komatsu 930E',
-    area: 'Mina Rajo Abierto',
-    faena: 'Faena Cordillera Sur',
-    altitudeMeters: 3800,
-    equipmentAssigned: 'CAEX #42',
-    criticality: 4,
-    gpsEnabled: true,
-    gpsCoordinates: { latitude: -23.8647, longitude: -69.0438 },
-    weather: DEFAULT_SAMPLE_WEATHER,
-    supervisorName: 'Carlos Henríquez',
-    supervisorEmail: 'supervisor.faena@minera.cl',
-    currentShift: {
-      type: 'night',
-      dayInRoster: 5,
-      totalRosterDays: 7,
-      shiftStart: '19:00',
-      shiftEnd: '07:00',
-      rosterPattern: '7x7 Continuo (Noche)'
-    },
-    baseline: {
-      meanRT: 420,
-      medianRT: 405,
-      standardDeviation: 35,
-      fastest10Percent: 360,
-      lapseThresholdMs: 650,
-      validTrialsCount: 42,
-      lastUpdated: '2026-08-10'
-    },
-    chronotype: 'intermediate'
-  },
-  {
-    id: 'w-102',
-    rut: '16.320.187-K',
-    name: 'Camila Valenzuela',
-    birthDate: '1987-11-03',
-    gender: 'Femenino',
-    company: 'Consorcio Minero Norte',
-    role: 'Operadora Pala Hidráulica CAT 6060',
-    area: 'Carguío y Transporte',
-    faena: 'Faena Altiplano',
-    altitudeMeters: 4100,
-    equipmentAssigned: 'Pala #08',
-    criticality: 3,
-    gpsEnabled: true,
-    gpsCoordinates: { latitude: -21.4521, longitude: -68.8920 },
-    weather: {
-      ...DEFAULT_SAMPLE_WEATHER,
-      altitudeMeters: 4100,
-      faenaName: 'Faena Altiplano (4.100 msnm)'
-    },
-    supervisorName: 'Rodrigo Araya',
-    supervisorEmail: 'supervisor.mina@consorcio.cl',
-    currentShift: {
-      type: 'day',
-      dayInRoster: 2,
-      totalRosterDays: 7,
-      shiftStart: '07:00',
-      shiftEnd: '19:00',
-      rosterPattern: '7x7 Continuo (Día)'
-    },
-    baseline: {
-      meanRT: 410,
-      medianRT: 398,
-      standardDeviation: 30,
-      fastest10Percent: 350,
-      lapseThresholdMs: 650,
-      validTrialsCount: 56,
-      lastUpdated: '2026-08-12'
-    },
-    chronotype: 'morning'
-  },
-  {
-    id: 'w-103',
-    rut: '13.441.902-8',
-    name: 'Rodrigo Castro P.',
-    birthDate: '1979-08-25',
-    gender: 'Masculino',
-    company: 'Transportes Cordillera S.A.',
-    role: 'Conductor Bus Transporte Personal',
-    area: 'Logística y Transporte',
-    faena: 'Faena Valle Central',
-    altitudeMeters: 1800,
-    equipmentAssigned: 'Bus Scania K440 #14',
-    criticality: 4,
-    gpsEnabled: true,
-    weather: DEFAULT_SAMPLE_WEATHER,
-    currentShift: {
-      type: 'night',
-      dayInRoster: 6,
-      totalRosterDays: 7,
-      shiftStart: '20:00',
-      shiftEnd: '06:00',
-      rosterPattern: '7x7 Continuo (Noche)'
-    },
-    baseline: {
-      meanRT: 430,
-      medianRT: 418,
-      standardDeviation: 32,
-      fastest10Percent: 370,
-      lapseThresholdMs: 650,
-      validTrialsCount: 38,
-      lastUpdated: '2026-08-08'
-    },
-    chronotype: 'evening'
-  },
-  {
-    id: 'w-104',
-    rut: '17.112.584-2',
-    name: 'Marcela Soto I.',
-    birthDate: '1991-01-14',
-    gender: 'Femenino',
-    company: 'Perforaciones y Tronadura',
-    role: 'Operadora Perforadora Pit Viper 351',
-    area: 'Perforación y Tronadura',
-    faena: 'Faena Cordillera Sur',
-    altitudeMeters: 3800,
-    equipmentAssigned: 'PV-351 #03',
-    criticality: 3,
-    gpsEnabled: true,
-    weather: DEFAULT_SAMPLE_WEATHER,
-    currentShift: {
-      type: 'night',
-      dayInRoster: 3,
-      totalRosterDays: 7,
-      shiftStart: '19:00',
-      shiftEnd: '07:00',
-      rosterPattern: '7x7 Continuo (Noche)'
-    },
-    baseline: {
-      meanRT: 415,
-      medianRT: 405,
-      standardDeviation: 28,
-      fastest10Percent: 360,
-      lapseThresholdMs: 650,
-      validTrialsCount: 30,
-      lastUpdated: '2026-08-11'
-    },
-    chronotype: 'intermediate'
-  },
-  {
-    id: 'w-105',
-    rut: '15.789.201-4',
-    name: 'Gonzalo Díaz E.',
-    birthDate: '1984-10-30',
-    gender: 'Masculino',
-    company: 'Mantenimiento Industrial',
-    role: 'Técnico Mecánico Chancador',
-    area: 'Planta Concentradora',
-    faena: 'Faena Valle Central',
-    altitudeMeters: 1800,
-    equipmentAssigned: 'Chancador Primario #02',
-    criticality: 2,
-    gpsEnabled: true,
-    weather: DEFAULT_SAMPLE_WEATHER,
-    currentShift: {
-      type: 'day',
-      dayInRoster: 4,
-      totalRosterDays: 5,
-      shiftStart: '08:00',
-      shiftEnd: '17:00',
-      rosterPattern: '5x2 Administrativo'
-    },
-    baseline: {
-      meanRT: 425,
-      medianRT: 412,
-      standardDeviation: 30,
-      fastest10Percent: 365,
-      lapseThresholdMs: 650,
-      validTrialsCount: 24,
-      lastUpdated: '2026-08-05'
-    },
-    chronotype: 'morning'
-  }
+  DEFAULT_EMPTY_WORKER
 ];
 
-export const MOCK_EVALUATIONS: FRARiskEvaluation[] = [
-  {
-    id: 'eval-prev-001',
-    workerId: 'w-101',
-    timestamp: '2026-08-13T06:45:00.000Z',
-    status: 'green',
-    statusLabel: 'Riesgo Operacional Controlado',
-    riskScore: 22,
-    confidenceScore: 94,
-    fei: 24,
-    kss: 3,
-    ipdPercentage: 3.2,
-    concordanceIndex: 'concordant_safe',
-    circadianPhase: 'intermediate',
-    altitudeImpact: 'high',
-    primaryFactors: [
-      'Sueño adecuado (7.2 hrs) con alta calidad percibida',
-      'Tiempo de reacción dentro del rango histórico de línea base'
-    ],
-    recommendedAction: 'Continuar Operación Habitual',
-    actionDetails: 'Parámetros psicomotores y de descanso óptimos.',
-    hashSha256: 'sha256-FRA-v2.0-89af41cd-69c3',
-    isOfflineSynced: true,
-    isReevaluation: false
-  },
-  {
-    id: 'eval-prev-002',
-    workerId: 'w-103',
-    timestamp: '2026-08-13T04:15:00.000Z',
-    status: 'red',
-    statusLabel: 'Riesgo Operacional Elevado',
-    riskScore: 78,
-    confidenceScore: 92,
-    fei: 82,
-    kss: 7,
-    ipdPercentage: 24.5,
-    concordanceIndex: 'concordant_risk',
-    circadianPhase: 'trough_critical_nadir',
-    altitudeImpact: 'low',
-    primaryFactors: [
-      'Sueño acortado: 4.5 hrs registradas en día 6 de noche',
-      'Tiempo de reacción: +24.5% sobre línea base (314ms vs 252ms)',
-      '2 lapsos psicomotores detectados (>500ms)',
-      'Ventana circadiana crítica de mínima alerta (04:15 hrs)'
-    ],
-    recommendedAction: 'Detención Preventiva y Activación de Protocolo',
-    actionDetails: 'Estacionar bus en zona segura. Notificar a supervisor de logística para relevo y pausa de recuperación.',
-    hashSha256: 'sha256-FRA-v2.0-bc41a98e-41a0',
-    isOfflineSynced: true,
-    isReevaluation: false
-  },
-  {
-    id: 'eval-prev-003',
-    workerId: 'w-104',
-    timestamp: '2026-08-13T03:30:00.000Z',
-    status: 'yellow',
-    statusLabel: 'Medida Preventiva Recomendada',
-    riskScore: 48,
-    confidenceScore: 90,
-    fei: 52,
-    kss: 4,
-    ipdPercentage: 17.8,
-    concordanceIndex: 'discordant_masked_fatigue',
-    circadianPhase: 'trough_critical_nadir',
-    altitudeImpact: 'high',
-    primaryFactors: [
-      'Discordancia detectada: KSS bajo (4/9) pero PVT ralentizado (+17.8%)',
-      '3800 msnm con 3 noches consecutivas de turno',
-      '1 lapso de atención registrado'
-    ],
-    recommendedAction: 'Pausa Activa 15 min + Hidratación + Reevaluación',
-    actionDetails: 'Realizar ejercicio de estiramiento en cabina, hidratación y repetir Micro-PVT antes de la siguiente fase de perforación.',
-    hashSha256: 'sha256-FRA-v2.0-7dae201b-90f1',
-    isOfflineSynced: true,
-    isReevaluation: false
-  }
-];
+export const MOCK_EVALUATIONS: FRARiskEvaluation[] = [];
 
-export const MOCK_INTERVENTIONS: InterventionRecord[] = [
-  {
-    id: 'int-001',
-    workerId: 'w-103',
-    evaluationId: 'eval-prev-002',
-    supervisorId: 'sup-carlos',
-    timestamp: '2026-08-13T04:20:00.000Z',
-    interventionType: 'temporary_relief',
-    customNotes: 'Conductor relevado por chofer de retén en terminal mina. Asignado a reposo en domo descanso.',
-    status: 'in_progress',
-    recoveryOutcome: undefined
-  },
-  {
-    id: 'int-002',
-    workerId: 'w-104',
-    evaluationId: 'eval-prev-003',
-    supervisorId: 'sup-carlos',
-    timestamp: '2026-08-13T03:35:00.000Z',
-    interventionType: 'active_break_15m',
-    customNotes: 'Pausa activa de 15 minutos en caseta de perforación, consumo de agua fría y colación liviana.',
-    status: 'completed',
-    recoveryOutcome: 'recovered_green',
-    completedAt: '2026-08-13T03:52:00.000Z'
-  }
-];
-
-export const MOCK_STOP_BANG: StopBangRecord[] = [
-  {
-    id: 'sb-001',
-    workerId: 'w-101',
-    date: '2026-05-14',
-    snoring: true,
-    tiredness: true,
-    observedApnea: false,
-    highBloodPressure: true,
-    bmiOver35: false,
-    ageOver50: true,
-    neckCircumferenceOver40cm: true,
-    genderMale: true,
-    totalScore: 6,
-    riskCategory: 'high',
-    medicalRecommendation: 'Derivación preventiva a Poligrafía / Polisomnografía ambulatoria en policlínico faena.',
-    referredToSleepStudy: true,
-    doctorNotes: 'Paciente asintomático en turno diurno, pero con ronquidos intensos reportados en campamento. Mantener seguimiento preventivo sin suspensión laboral.'
-  },
-  {
-    id: 'sb-002',
-    workerId: 'w-102',
-    date: '2026-06-20',
-    snoring: false,
-    tiredness: false,
-    observedApnea: false,
-    highBloodPressure: false,
-    bmiOver35: false,
-    ageOver50: false,
-    neckCircumferenceOver40cm: false,
-    genderMale: false,
-    totalScore: 0,
-    riskCategory: 'low',
-    medicalRecommendation: 'Control anual de salud ocupacional habitual.',
-    referredToSleepStudy: false
-  }
-];
+export const MOCK_INTERVENTIONS: InterventionRecord[] = [];
 
 export const MOCK_ALGORITHM_LOGS: AlgorithmVersionLog[] = [
   {
@@ -402,7 +103,7 @@ export const MOCK_ALGORITHM_LOGS: AlgorithmVersionLog[] = [
   {
     version: 'v1.4 (Legacy)',
     releaseDate: '2025-11-15',
-    leadScientist: 'Equipo I+D FRMS',
+    leadScientist: 'Equipo I+D SGFS',
     approvalCommittee: 'Dirección Médica Ocupacional',
     changesSummary: 'Calibración de latencia táctil en pantallas OLED/LCD industriales. Primer prototipo de PVT adaptativo en 60s.',
     validationMetrics: {
@@ -602,7 +303,7 @@ export const MOCK_MEETINGS: MeetingSession[] = [
     facilitatorRut: '10.832.190-7',
     faena: 'Faena Cordillera Sur',
     altitudeMeters: 3800,
-    objective: 'Revisión del desempeño del sistema FRMS, análisis del incidente INC-2026-088 y evaluación de descansos en domos presurizados.',
+    objective: 'Revisión del desempeño del sistema SGFS, análisis del incidente INC-2026-088 y evaluación de descansos en domos presurizados.',
     topics: [
       {
         id: 'top-201',

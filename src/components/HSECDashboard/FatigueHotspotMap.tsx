@@ -118,8 +118,8 @@ export const FatigueHotspotMap: React.FC = () => {
 
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5">
           <div className="flex items-center gap-1.5 font-bold text-slate-900">
-            <Info className="w-4 h-4 text-amber-600" />
-            <span>Medida de Ingeniería y Gestión FRMS Recomendada:</span>
+            <Info className="w-4 h-4 text-blue-600" />
+            <span>Medida de Ingeniería y Gestión SGFS Recomendada:</span>
           </div>
           <p className="text-slate-600 leading-relaxed">
             Implementar protocolo obligatorio de pausa activa de 15 minutos e hidratación a las 04:00 hrs para toda la flota CAEX y buses de transporte de personal.

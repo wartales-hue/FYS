@@ -36,7 +36,24 @@ import { GpsPromptModal } from '../GpsPromptModal';
 import { validateRut, formatRut, cleanRut } from '../../lib/rutValidator';
 import { RutErrorModal } from '../RutErrorModal';
 import { WeatherManualEditModal } from '../WeatherManualEditModal';
-import { Edit2, WifiOff } from 'lucide-react';
+import { 
+  getAllSupervisors, 
+  getSavedSupervisorsForWorker, 
+  findSupervisorByCode,
+  saveSupervisorToWorkerHistory,
+  isSupervisorPaid
+} from '../../lib/supervisorCrewManager';
+import { 
+  isAuthorizedSupervisorRut, 
+  isPremiumActive, 
+  registerSupervisorRutAsPremium 
+} from '../../lib/premiumService';
+import { GooglePlaySubscriptionModal } from '../GooglePlaySubscriptionModal';
+import { SupervisorQrScannerModal, ScannedSupervisorData } from './SupervisorQrScannerModal';
+import { NonMedicalDisclaimerModal } from '../GooglePlayCompliance/NonMedicalDisclaimerModal';
+import { GooglePlayPermissionsModal } from '../GooglePlayCompliance/GooglePlayPermissionsModal';
+import { PrivacyPolicyAndAccountDeletionModal } from '../GooglePlayCompliance/PrivacyPolicyAndAccountDeletionModal';
+import { Edit2, WifiOff, Users, QrCode, Lock, Check, Crown, Scan, Trash2, Scale, Smartphone, ShieldAlert } from 'lucide-react';
 
 interface PersonalDataViewProps {
   worker: WorkerProfile;
@@ -50,16 +67,20 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
   // Form State
   const [name, setName] = useState(worker.name || '');
   const [rut, setRut] = useState(worker.rut || '');
-  const [birthDate, setBirthDate] = useState(worker.birthDate || '1988-06-15');
+  const [birthDate, setBirthDate] = useState(worker.birthDate || '');
   const [gender, setGender] = useState<'Masculino' | 'Femenino' | 'Otro'>(worker.gender || 'Masculino');
   const [company, setCompany] = useState(worker.company || '');
   const [role, setRole] = useState(worker.role || '');
   const [equipmentAssigned, setEquipmentAssigned] = useState(worker.equipmentAssigned || '');
-  const [faena, setFaena] = useState(worker.faena || 'Faena Cordillera Sur');
-  const [altitudeMeters, setAltitudeMeters] = useState(worker.altitudeMeters || 3800);
-  const [supervisorName, setSupervisorName] = useState(worker.supervisorName || 'Carlos Henríquez');
-  const [supervisorEmail, setSupervisorEmail] = useState(worker.supervisorEmail || 'supervisor.faena@minera.cl');
-  const [shiftPattern, setShiftPattern] = useState<string>(worker.shiftPattern || worker.currentShift?.rosterPattern || '7x7');
+  const [faena, setFaena] = useState(worker.faena || '');
+  const [altitudeMeters, setAltitudeMeters] = useState(worker.altitudeMeters || 0);
+  const [supervisorName, setSupervisorName] = useState(worker.supervisorName || '');
+  const [supervisorEmail, setSupervisorEmail] = useState(worker.supervisorEmail || '');
+  const [supervisorCode, setSupervisorCode] = useState(worker.supervisorCode || '');
+  const [supervisorRut, setSupervisorRut] = useState(worker.supervisorRut || '');
+  const [shiftPattern, setShiftPattern] = useState<string>(worker.shiftPattern || worker.currentShift?.rosterPattern || '4x4');
+  const [customWorkDays, setCustomWorkDays] = useState<number>(4);
+  const [customRestDays, setCustomRestDays] = useState<number>(4);
   const [habitualShiftType, setHabitualShiftType] = useState<'day' | 'night' | 'rotative'>(
     worker.habitualShiftType || (worker.currentShift?.type === 'night' ? 'night' : 'day')
   );
@@ -71,6 +92,13 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
   const [gpsMessage, setGpsMessage] = useState<string | null>(null);
   const [showGpsModal, setShowGpsModal] = useState(false);
   const [gpsModalError, setGpsModalError] = useState<string | null>(null);
+  const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
+  const [showQrScannerModal, setShowQrScannerModal] = useState<boolean>(false);
+  const [showNonMedicalModal, setShowNonMedicalModal] = useState<boolean>(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState<boolean>(false);
+  const [showPrivacyDeleteModal, setShowPrivacyDeleteModal] = useState<boolean>(false);
+
+  const isUserPremium = isAuthorizedSupervisorRut(rut) || isAuthorizedSupervisorRut(supervisorRut) || isPremiumActive(rut, supervisorRut);
 
   // RUT Validation Modal
   const [showRutErrorModal, setShowRutErrorModal] = useState(false);
@@ -92,16 +120,16 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
   useEffect(() => {
     setName(worker.name || '');
     setRut(worker.rut || '');
-    setBirthDate(worker.birthDate || '1988-06-15');
+    setBirthDate(worker.birthDate || '');
     setGender(worker.gender || 'Masculino');
     setCompany(worker.company || '');
     setRole(worker.role || '');
     setEquipmentAssigned(worker.equipmentAssigned || '');
-    setFaena(worker.faena || 'Faena Cordillera Sur');
-    setAltitudeMeters(worker.altitudeMeters || 3800);
-    setSupervisorName(worker.supervisorName || 'Carlos Henríquez');
-    setSupervisorEmail(worker.supervisorEmail || 'supervisor.faena@minera.cl');
-    setShiftPattern(worker.shiftPattern || worker.currentShift?.rosterPattern || '7x7');
+    setFaena(worker.faena || '');
+    setAltitudeMeters(worker.altitudeMeters || 0);
+    setSupervisorName(worker.supervisorName || '');
+    setSupervisorEmail(worker.supervisorEmail || '');
+    setShiftPattern(worker.shiftPattern || worker.currentShift?.rosterPattern || '4x4');
     setHabitualShiftType(worker.habitualShiftType || (worker.currentShift?.type === 'night' ? 'night' : 'day'));
     if (worker.weather) {
       setWeatherData(worker.weather);
@@ -228,6 +256,8 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
       altitudeMeters: Number(altitudeMeters),
       supervisorName: supervisorName.trim(),
       supervisorEmail: supervisorEmail.trim().toLowerCase(),
+      supervisorCode: supervisorCode.trim().toUpperCase(),
+      supervisorRut: supervisorRut.trim(),
       shiftPattern,
       habitualShiftType,
       profileCompleted: true,
@@ -240,7 +270,29 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
       }
     };
 
+    if (isAuthorizedSupervisorRut(formattedRutStr)) {
+      registerSupervisorRutAsPremium(formattedRutStr);
+    }
+    if (supervisorRut && isAuthorizedSupervisorRut(supervisorRut)) {
+      registerSupervisorRutAsPremium(supervisorRut);
+    }
+
     onUpdateWorker(updatedProfile);
+
+    // Also save custom/updated supervisor to history so check-in uses exact email
+    if (supervisorCode || supervisorEmail) {
+      saveSupervisorToWorkerHistory({
+        code: supervisorCode.trim().toUpperCase() || 'SUP-01',
+        name: supervisorName.trim() || 'Supervisor HSEC',
+        rut: supervisorRut.trim() || '12.345.678-9',
+        company: company.trim() || 'Empresa Faena',
+        faena: faena.trim() || 'Faena Operacional',
+        email: supervisorEmail.trim().toLowerCase(),
+        shiftName: 'Turno Actual',
+        lastUsedDate: new Date().toISOString().split('T')[0],
+        planStatus: 'active'
+      });
+    }
 
     // Save to localStorage so future sessions don't need re-entry
     try {
@@ -256,6 +308,56 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
       setSavedMessage('✓ Datos personales guardados y sincronizados permanentemente.');
     }
 
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 4500);
+  };
+
+  const handleSupervisorQrScanned = (scanned: ScannedSupervisorData) => {
+    setSupervisorCode(scanned.code);
+    setSupervisorName(scanned.name);
+    if (scanned.rut) setSupervisorRut(scanned.rut);
+    if (scanned.email) setSupervisorEmail(scanned.email);
+    if (scanned.faena) setFaena(scanned.faena);
+    if (scanned.company) setCompany(scanned.company);
+
+    const updatedProfile: WorkerProfile = {
+      ...worker,
+      supervisorCode: scanned.code,
+      supervisorName: scanned.name,
+      supervisorRut: scanned.rut || supervisorRut || '12.080.702-1',
+      supervisorEmail: scanned.email,
+      company: scanned.company || company || worker.company,
+      faena: scanned.faena || faena || worker.faena
+    };
+
+    if (scanned.rut && isAuthorizedSupervisorRut(scanned.rut)) {
+      registerSupervisorRutAsPremium(scanned.rut);
+    }
+    if (isAuthorizedSupervisorRut(scanned.code)) {
+      registerSupervisorRutAsPremium(scanned.code);
+    }
+
+    saveSupervisorToWorkerHistory({
+      code: scanned.code,
+      name: scanned.name,
+      rut: scanned.rut || '12.080.702-1',
+      company: scanned.company || company || 'Empresa Operadora',
+      faena: scanned.faena || faena || 'Faena Minera',
+      email: scanned.email,
+      shiftName: scanned.shiftName || 'Turno Activo',
+      lastUsedDate: new Date().toISOString().split('T')[0],
+      planStatus: 'active'
+    });
+
+    onUpdateWorker(updatedProfile);
+    try {
+      localStorage.setItem(`fys_profile_${worker.id}`, JSON.stringify(updatedProfile));
+      localStorage.setItem('fys_current_worker_id', worker.id);
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+
+    setSavedMessage(`✓ Cuenta de Supervisor ${scanned.name} (${scanned.code}) vinculada exitosamente mediante escaneo QR.`);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 4500);
   };
@@ -317,12 +419,31 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
           </p>
         </div>
 
-        {savedSuccess && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>{savedMessage}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {isUserPremium ? (
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-amber-50 to-emerald-50 border border-amber-300 text-amber-900 text-xs font-bold rounded-xl shadow-xs">
+              <Crown className="w-4 h-4 text-amber-500" />
+              <span>Cuenta Premium Activa ($0.99 USD/mes)</span>
+            </div>
+          ) : (
+            <button
+              id="personal-data-upgrade-premium-btn"
+              type="button"
+              onClick={() => setShowPremiumModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black rounded-xl shadow-md transition-all cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>Convierte a Cuenta Premium ($0.99 USD/mes)</span>
+            </button>
+          )}
+
+          {savedSuccess && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span>{savedMessage}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -411,17 +532,71 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                 </label>
                 <select
                   id="worker-shift-pattern-select"
-                  value={shiftPattern}
-                  onChange={(e) => setShiftPattern(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors cursor-pointer"
+                  value={['7x7', '4x3', '5x2', '4x4', '6x1', '10x10', '8x6', '10x5', '14x14'].includes(shiftPattern) ? shiftPattern : 'Turno Especial'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'Turno Especial') {
+                      setShiftPattern(`${customWorkDays}x${customRestDays}`);
+                    } else {
+                      setShiftPattern(val);
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors cursor-pointer"
                 >
-                  <option value="7x7">7x7 Continuo (7 días trabajo x 7 descanso)</option>
+                  <option value="7x7">7x7 (7 días trabajo x 7 descanso)</option>
                   <option value="4x3">4x3 (4 días trabajo x 3 descanso)</option>
-                  <option value="14x14">14x14 Continuo</option>
-                  <option value="5x2">5x2 (Lunes a Viernes)</option>
-                  <option value="6x1">6x1 Faena</option>
-                  <option value="Turno Especial">Turno Especial / Rol Flexible</option>
+                  <option value="5x2">5x2 (5 días trabajo x 2 descanso)</option>
+                  <option value="4x4">4x4 (4 días trabajo x 4 descanso)</option>
+                  <option value="6x1">6x1 (6 días trabajo x 1 descanso)</option>
+                  <option value="10x10">10x10 (10 días trabajo x 10 descanso)</option>
+                  <option value="8x6">8x6 (8 días trabajo x 6 descanso)</option>
+                  <option value="10x5">10x5 (10 días trabajo x 5 descanso)</option>
+                  <option value="14x14">14x14 (14 días trabajo x 14 descanso)</option>
+                  <option value="Turno Especial">➕ Crear otra jornada (Personalizada)</option>
                 </select>
+
+                {!['7x7', '4x3', '5x2', '4x4', '6x1', '10x10', '8x6', '10x5', '14x14'].includes(shiftPattern) && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2 text-xs">
+                    <span className="font-bold text-blue-900 block text-[11px]">
+                      Configurar Jornada Personalizada:
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-slate-600 block mb-0.5">Días de Trabajo:</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="30"
+                          value={customWorkDays}
+                          onChange={(e) => {
+                            const w = Math.max(1, parseInt(e.target.value) || 1);
+                            setCustomWorkDays(w);
+                            setShiftPattern(`${w}x${customRestDays}`);
+                          }}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-center text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-600 block mb-0.5">Días de Descanso:</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="30"
+                          value={customRestDays}
+                          onChange={(e) => {
+                            const r = Math.max(1, parseInt(e.target.value) || 1);
+                            setCustomRestDays(r);
+                            setShiftPattern(`${customWorkDays}x${r}`);
+                          }}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg font-bold text-center text-xs"
+                        />
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-blue-700 block font-mono">
+                      Patrón resultante: <strong>{shiftPattern}</strong> ({customWorkDays} días continuos x {customRestDays} descanso)
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Habitual Shift Type */}
@@ -433,7 +608,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                   id="worker-habitual-shift-select"
                   value={habitualShiftType}
                   onChange={(e) => setHabitualShiftType(e.target.value as any)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors cursor-pointer"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors cursor-pointer"
                 >
                   <option value="day">☀️ Diurna (Turno Día)</option>
                   <option value="night">🌙 Nocturna (Turno Noche)</option>
@@ -452,7 +627,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
                   placeholder="Ej: Minera Los Andes / Contratista"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
                 />
               </div>
 
@@ -467,7 +642,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                   placeholder="Ej: Operador CAEX Komatsu 930E"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
                 />
               </div>
 
@@ -482,14 +657,14 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                   value={equipmentAssigned}
                   onChange={(e) => setEquipmentAssigned(e.target.value)}
                   placeholder="Ej: CAEX #42"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
                 />
               </div>
 
               {/* Faena & Altitude */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700 block">
-                  Faena Minera:
+                  Faena o Lugar de trabajo:
                 </label>
                 <input
                   id="worker-faena-input"
@@ -497,7 +672,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                   value={faena}
                   onChange={(e) => setFaena(e.target.value)}
                   placeholder="Ej: Faena Cordillera Sur"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-amber-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
                 />
               </div>
 
@@ -516,21 +691,84 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
               </div>
             </div>
 
-            {/* Supervisor Information Section (Email Notification Target) */}
-            <div className="p-4 bg-sky-50/80 border border-sky-200 rounded-2xl space-y-3">
+            {/* Supervisor Information Section (Cuadrilla & Email Target) */}
+            <div className="p-4 bg-sky-50/90 border border-sky-200 rounded-2xl space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
-                  <Mail className="w-4 h-4 text-sky-700" />
-                  Notificación y Envío de Copia al Supervisor
+                  <Users className="w-4 h-4 text-sky-700" />
+                  Supervisor Asignado & Cuadrilla
                 </span>
-                <span className="text-[10px] bg-sky-200/90 text-sky-800 font-semibold px-2 py-0.5 rounded-full">
-                  Copia Automática
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowQrScannerModal(true)}
+                  className="text-[10px] bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                >
+                  <QrCode className="w-3 h-3 text-slate-950" />
+                  <span>Escanear QR</span>
+                </button>
               </div>
               <p className="text-[11px] text-sky-800 leading-relaxed">
-                Cada vez que se complete una evaluación pre-turno, se enviará automáticamente una copia digital íntegra del informe y resultado al correo del supervisor directo.
+                Selecciona tu supervisor habitual, ingresa su código único o escanea su código QR proyectado para asociar tus estadísticas de turno y despachos de certificados oficiales.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+
+              {/* Quick Supervisor Presets Selector */}
+              <div className="space-y-1">
+                <label className="font-bold text-slate-800 block text-[11px]">
+                  Supervisores Registrados en tu Cuenta:
+                </label>
+                <select
+                  value={getAllSupervisors().some(s => s.code === supervisorCode) ? supervisorCode : 'CUSTOM'}
+                  onChange={(e) => {
+                    if (e.target.value === 'CUSTOM') {
+                      setSupervisorCode('CUSTOM');
+                      return;
+                    }
+                    const selected = getAllSupervisors().find(s => s.code === e.target.value);
+                    if (selected) {
+                      setSupervisorCode(selected.code);
+                      setSupervisorName(selected.name);
+                      setSupervisorRut(selected.rut);
+                      setSupervisorEmail(selected.email);
+                      saveSupervisorToWorkerHistory(selected);
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors cursor-pointer"
+                >
+                  <option value="CUSTOM">
+                    {getAllSupervisors().length === 0 ? '-- Ningún supervisor registrado (Ingresa código o datos abajo) --' : '-- Ingreso Manual / Otro Supervisor --'}
+                  </option>
+                  {getAllSupervisors().map(sup => (
+                    <option key={sup.code} value={sup.code}>
+                      {sup.code} - {sup.name} (RUT: {sup.rut} • {sup.shiftName})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-800 block text-[11px]">
+                    Código de Cuadrilla:
+                  </label>
+                  <input
+                    id="worker-supervisor-code-input"
+                    type="text"
+                    value={supervisorCode}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      setSupervisorCode(val);
+                      const resolved = findSupervisorByCode(val);
+                      if (resolved) {
+                        setSupervisorName(resolved.name);
+                        setSupervisorRut(resolved.rut);
+                        setSupervisorEmail(resolved.email);
+                      }
+                    }}
+                    placeholder="Ej: YTR024"
+                    required
+                    className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-mono font-bold text-xs transition-colors"
+                  />
+                </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-800 block text-[11px]">
                     Nombre del Supervisor:
@@ -540,26 +778,74 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
                     type="text"
                     value={supervisorName}
                     onChange={(e) => setSupervisorName(e.target.value)}
-                    placeholder="Ej: Carlos Henríquez"
+                    placeholder="Ej: José Valdivia Soto"
                     required
                     className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-800 block text-[11px]">
-                    Email del Supervisor:
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-800 block text-[11px]">
+                      Email del Supervisor:
+                    </label>
+                    {!(isUserPremium || isSupervisorPaid(supervisorCode)) && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPremiumModal(true)}
+                        className="text-[10px] text-amber-700 bg-amber-100 hover:bg-amber-200 font-bold px-1.5 py-0.2 rounded border border-amber-200 flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Lock className="w-2.5 h-2.5 text-amber-700" />
+                        Versión Pago ($0.99)
+                      </button>
+                    )}
+                  </div>
                   <input
                     id="worker-supervisor-email-input"
                     type="email"
-                    value={supervisorEmail}
-                    onChange={(e) => setSupervisorEmail(e.target.value)}
-                    placeholder="Ej: supervisor.faena@minera.cl"
-                    required
-                    className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-medium text-xs transition-colors"
+                    value={(isUserPremium || isSupervisorPaid(supervisorCode)) ? supervisorEmail : ''}
+                    onChange={(e) => (isUserPremium || isSupervisorPaid(supervisorCode)) && setSupervisorEmail(e.target.value)}
+                    placeholder={(isUserPremium || isSupervisorPaid(supervisorCode)) ? "Ej: supervisor@faena.cl" : "Disponible para versión premium del supervisor"}
+                    disabled={!(isUserPremium || isSupervisorPaid(supervisorCode))}
+                    className={`w-full px-3 py-2 rounded-xl border text-xs transition-colors ${
+                      (isUserPremium || isSupervisorPaid(supervisorCode))
+                        ? 'border-sky-300 bg-white focus:border-sky-500 focus:outline-none text-slate-900 font-medium'
+                        : 'border-slate-300 bg-slate-100 text-slate-400 cursor-not-allowed italic'
+                    }`}
                   />
                 </div>
               </div>
+
+              {/* Paid supervisor indicator / notice */}
+              {(isUserPremium || isSupervisorPaid(supervisorCode)) ? (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span>Supervisor con Versión Premium Vinculado: Envío automático de certificados activado.</span>
+                  </div>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md border border-emerald-200">
+                    Pro Crew Activo
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50/90 border border-amber-200/90 rounded-xl text-[11px] text-amber-900 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-950">
+                      <Lock className="w-3.5 h-3.5 text-amber-700 flex-shrink-0" />
+                      <span>Apartado de Email y Despacho Automático (Versión Premium del Supervisor)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPremiumModal(true)}
+                      className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] rounded-lg shadow-2xs cursor-pointer"
+                    >
+                      Activar ($0.99 USD/mes)
+                    </button>
+                  </div>
+                  <p className="text-[10.5px] text-amber-800 leading-tight">
+                    Para activar el ingreso de email y despacho automático de certificados, el trabajador debe estar vinculado a una cuenta con <strong>versión premium del supervisor</strong> (o suscripción Google Play).
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Shift dynamic note */}
@@ -570,8 +856,18 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
               </p>
             </div>
 
-            {/* Save Button */}
-            <div className="pt-2">
+            {/* Action Buttons: Scan Supervisor QR & Save */}
+            <div className="pt-2 space-y-2.5">
+              <button
+                id="scan-supervisor-qr-btn"
+                type="button"
+                onClick={() => setShowQrScannerModal(true)}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer border border-amber-400 hover:scale-[1.005] active:scale-[0.99]"
+              >
+                <QrCode className="w-4 h-4 text-slate-950" />
+                <span>Escanear Cuenta Supervisor QR</span>
+              </button>
+
               <button
                 id="save-personal-data-btn"
                 type="submit"
@@ -736,7 +1032,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
 
             {/* 3 Days Forecast List: Today, Tomorrow, +2 Days */}
             <div className="space-y-2.5">
-              {weatherData.forecast.map((day, idx) => (
+              {(weatherData?.forecast || DEFAULT_SAMPLE_WEATHER.forecast).map((day, idx) => (
                 <div 
                   key={idx} 
                   className={`p-3.5 rounded-xl border transition-all ${
@@ -820,6 +1116,96 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
         </div>
       </div>
 
+      {/* Google Play Store Compliance, Permissions & Account Deletion Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 block">
+              Directivas Google Play Store • Seguridad y Privacidad
+            </span>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-blue-600" />
+              <span>Gobernanza de Datos, Permisos y Deslinde Legal</span>
+            </h3>
+          </div>
+          <span className="text-[10px] font-mono text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full font-bold self-start sm:self-auto">
+            ✓ Cumplimiento Play Store 2026
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Non-Medical Disclaimer */}
+          <button
+            type="button"
+            onClick={() => setShowNonMedicalModal(true)}
+            className="p-3.5 bg-amber-50/60 hover:bg-amber-50 border border-amber-200 rounded-xl text-left transition-all space-y-1.5 cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <Scale className="w-4 h-4 text-amber-600 group-hover:scale-110 transition-transform" />
+              <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">Salud & Legal</span>
+            </div>
+            <h4 className="text-xs font-bold text-amber-950">Deslinde No-Médico</h4>
+            <p className="text-[11px] text-amber-900 leading-snug">
+              Declaración de clasificación operacional y no-sustitución de diagnóstico clínico.
+            </p>
+          </button>
+
+          {/* Permissions Transparency (Zero Audio / Foreground Only) */}
+          <button
+            type="button"
+            onClick={() => setShowPermissionsModal(true)}
+            className="p-3.5 bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-200 rounded-xl text-left transition-all space-y-1.5 cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <Smartphone className="w-4 h-4 text-emerald-600 group-hover:scale-110 transition-transform" />
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">Permisos</span>
+            </div>
+            <h4 className="text-xs font-bold text-emerald-950">GPS & Cero Audio</h4>
+            <p className="text-[11px] text-emerald-900 leading-snug">
+              Ubicación en primer plano únicamente. Cero grabación ni acceso a micrófono.
+            </p>
+          </button>
+
+          {/* Privacy Policy & Public Deletion URL */}
+          <button
+            type="button"
+            onClick={() => setShowPrivacyDeleteModal(true)}
+            className="p-3.5 bg-blue-50/60 hover:bg-blue-50 border border-blue-200 rounded-xl text-left transition-all space-y-1.5 cursor-pointer group"
+          >
+            <div className="flex items-center justify-between">
+              <FileText className="w-4 h-4 text-blue-600 group-hover:scale-110 transition-transform" />
+              <span className="text-[9px] font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded">Privacidad</span>
+            </div>
+            <h4 className="text-xs font-bold text-blue-950">Política de Datos</h4>
+            <p className="text-[11px] text-blue-900 leading-snug">
+              Tratamiento Ley 21.719, enlace web público y derechos ARCO.
+            </p>
+          </button>
+        </div>
+
+        {/* Prominent In-App Account Deletion Button (Google Play Account Deletion Policy) */}
+        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-rose-50/50 p-4 rounded-xl border border-rose-100">
+          <div className="space-y-0.5 text-left w-full sm:w-auto">
+            <span className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-rose-600" />
+              Eliminación Definitiva de Cuenta y Datos (In-App)
+            </span>
+            <p className="text-[11px] text-rose-800">
+              Elimina de forma irreversible tu perfil, historial de pruebas psicomotoras y tokens de este dispositivo.
+            </p>
+          </div>
+          <button
+            id="open-account-deletion-modal-btn"
+            type="button"
+            onClick={() => setShowPrivacyDeleteModal(true)}
+            className="w-full sm:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer flex-shrink-0"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Eliminar Mi Cuenta</span>
+          </button>
+        </div>
+      </div>
+
       {/* Weather Manual Edit & Calibration Modal */}
       <WeatherManualEditModal
         isOpen={showWeatherModal}
@@ -855,6 +1241,44 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
         onClose={() => setShowRutErrorModal(false)}
         rutEntered={rut}
         errorMessage={rutErrorMessage}
+      />
+
+      {/* Google Play Subscription Modal */}
+      <GooglePlaySubscriptionModal
+        isOpen={showPremiumModal}
+        onClose={() => setShowPremiumModal(false)}
+        initialRut={rut || supervisorRut}
+        onSuccess={() => {
+          if (!supervisorName) setSupervisorName('Supervisor HSEC');
+          if (!supervisorEmail) setSupervisorEmail('supervisor.hsec@faenaminera.cl');
+        }}
+      />
+
+      {/* Supervisor QR Scanner Modal */}
+      <SupervisorQrScannerModal
+        isOpen={showQrScannerModal}
+        onClose={() => setShowQrScannerModal(false)}
+        onScanSuccess={handleSupervisorQrScanned}
+      />
+
+      {/* Non-Medical Disclaimer Modal */}
+      <NonMedicalDisclaimerModal
+        isOpen={showNonMedicalModal}
+        onClose={() => setShowNonMedicalModal(false)}
+      />
+
+      {/* Permissions Transparency Modal */}
+      <GooglePlayPermissionsModal
+        isOpen={showPermissionsModal}
+        onClose={() => setShowPermissionsModal(false)}
+      />
+
+      {/* Privacy Policy & Account Deletion Modal */}
+      <PrivacyPolicyAndAccountDeletionModal
+        isOpen={showPrivacyDeleteModal}
+        onClose={() => setShowPrivacyDeleteModal(false)}
+        userRut={rut}
+        userName={name}
       />
     </div>
   );

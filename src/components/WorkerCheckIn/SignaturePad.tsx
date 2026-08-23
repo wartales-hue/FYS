@@ -26,6 +26,8 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [hasSignature, setHasSignature] = useState<boolean>(false);
 
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -74,6 +76,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    lastPointRef.current = { x, y };
     setIsDrawing(true);
     setHasSignature(true);
   };
@@ -86,12 +89,21 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
     if (!ctx) return;
 
     const { x, y } = getCoordinates(e);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    if (lastPointRef.current) {
+      const midX = (lastPointRef.current.x + x) / 2;
+      const midY = (lastPointRef.current.y + y) / 2;
+      ctx.quadraticCurveTo(lastPointRef.current.x, lastPointRef.current.y, midX, midY);
+      ctx.stroke();
+    } else {
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+    lastPointRef.current = { x, y };
   };
 
   const stopDrawing = () => {
     if (!isDrawing) return;
+    lastPointRef.current = null;
     setIsDrawing(false);
     exportSignature();
   };
@@ -122,7 +134,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2 text-slate-900">
-            <PenTool className="w-4 h-4 text-amber-600" />
+            <PenTool className="w-4 h-4 text-blue-600" />
             <h3 className="text-sm font-bold">{title}</h3>
           </div>
           {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
@@ -186,7 +198,7 @@ export const SignaturePad: React.FC<SignaturePadProps> = ({
               <span>Firma capturada</span>
             </span>
           ) : (
-            <span className="text-xs text-amber-700 font-medium bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+            <span className="text-xs text-blue-700 font-medium bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
               Firma requerida para emisión
             </span>
           )}

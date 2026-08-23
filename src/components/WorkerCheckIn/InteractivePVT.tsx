@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, RotateCcw, Zap, AlertCircle, CheckCircle2, Award, Clock, Snowflake, Smartphone, ArrowRight } from 'lucide-react';
-import { PVTMode, PVTSummary, PVTTrialResult, WorkerProfile } from '../../types';
+import { Play, RotateCcw, Zap, AlertCircle, CheckCircle2, Award, Clock, Snowflake, Smartphone, ArrowRight, ShieldCheck, Activity } from 'lucide-react';
+import { PVTMode, PVTSummary, PVTTrialResult, WorkerProfile, PVTDeviceContext } from '../../types';
 
 interface InteractivePVTProps {
   mode: PVTMode;
   worker: WorkerProfile;
-  onComplete: (summary: PVTSummary) => void;
+  onComplete: (summary: PVTSummary, deviceContext?: PVTDeviceContext) => void;
   onAcceptAndContinue?: () => void;
   disabled?: boolean;
 }
@@ -17,7 +17,8 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
   onAcceptAndContinue,
   disabled = false,
 }) => {
-  const targetTrialCount = mode === 'Micro-PVT' ? 3 : mode === 'PVT-A' ? 5 : mode === 'PVT-L' ? 10 : 12;
+  // PVT-A: 6 trials (worst reaction discarded to prevent accidental taps), Micro-PVT / Línea Base: 5 trials, PVT-L: 10, Baseline: 12
+  const targetTrialCount = mode === 'Micro-PVT' ? 5 : mode === 'PVT-A' ? 6 : mode === 'PVT-L' ? 10 : 12;
   
   const [gameState, setGameState] = useState<'idle' | 'waiting' | 'active' | 'trial_feedback' | 'false_start' | 'finished'>('idle');
   const [currentTrial, setCurrentTrial] = useState<number>(0);
@@ -28,17 +29,54 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
   const [repeatReason, setRepeatReason] = useState<string>('');
   const [showRepeatOptions, setShowRepeatOptions] = useState<boolean>(false);
   const [lastSummary, setLastSummary] = useState<PVTSummary | null>(null);
+  const [interruptionDetected, setInterruptionDetected] = useState<boolean>(false);
+  const [measuredHz, setMeasuredHz] = useState<number>(60);
 
   const startTimeRef = useRef<number>(0);
   const timerRafRef = useRef<number | null>(null);
   const stimulusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const delayMsRef = useRef<number>(0);
+  const calibratedTouchLatencyMs = useRef<number>(10);
+  const interruptionRef = useRef<boolean>(false);
 
-  // Clear timers on unmount
+  // Auto-calibrate display refresh rate and detect tab interruptions
   useEffect(() => {
+    let frameTimes: number[] = [];
+    let rafId: number;
+    let count = 0;
+
+    const measureHz = (now: number) => {
+      frameTimes.push(now);
+      if (frameTimes.length > 20) {
+        const deltas = [];
+        for (let i = 1; i < frameTimes.length; i++) {
+          deltas.push(frameTimes[i] - frameTimes[i - 1]);
+        }
+        const avgFrameMs = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+        const fps = Math.round(1000 / avgFrameMs);
+        setMeasuredHz(fps > 0 ? fps : 60);
+        // ~16.6ms is 60Hz (typical touch latency ~14ms), ~8.3ms is 120Hz (typical touch latency ~8ms)
+        calibratedTouchLatencyMs.current = Math.round(avgFrameMs * 0.75);
+      } else if (count < 25) {
+        count++;
+        rafId = requestAnimationFrame(measureHz);
+      }
+    };
+    rafId = requestAnimationFrame(measureHz);
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        interruptionRef.current = true;
+        setInterruptionDetected(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       if (timerRafRef.current) cancelAnimationFrame(timerRafRef.current);
       if (stimulusTimeoutRef.current) clearTimeout(stimulusTimeoutRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -157,19 +195,35 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
   const finishTest = (finalTrials: PVTTrialResult[]) => {
     setGameState('finished');
     const valid = finalTrials.filter(t => !t.isFalseStart && t.reactionTimeMs > 0);
-    const rts = valid.map(t => t.reactionTimeMs).sort((a, b) => a - b);
+    
+    // In PVT-A mode (6 trials), discard the single worst reaction time to filter out accidental involuntary errors
+    let filteredValidTrials = [...valid];
+    if (mode === 'PVT-A' && valid.length >= 4) {
+      // Find the trial with highest reaction time
+      const maxRT = Math.max(...valid.map(t => t.reactionTimeMs));
+      let discarded = false;
+      filteredValidTrials = valid.filter(t => {
+        if (!discarded && t.reactionTimeMs === maxRT) {
+          discarded = true;
+          return false;
+        }
+        return true;
+      });
+    }
+
+    const rts = filteredValidTrials.map(t => t.reactionTimeMs).sort((a, b) => a - b);
     
     const sum = rts.reduce((acc, val) => acc + val, 0);
     const mean = rts.length > 0 ? Math.round(sum / rts.length) : 0;
     const median = rts.length > 0 ? rts[Math.floor(rts.length / 2)] : 0;
     const fastest = rts.length > 0 ? rts[0] : 0;
     const slowest = rts.length > 0 ? rts[rts.length - 1] : 0;
-    const lapses = finalTrials.filter(t => t.isLapse).length;
+    const lapses = filteredValidTrials.filter(t => t.isLapse).length;
     const falseStarts = finalTrials.filter(t => t.isFalseStart).length;
 
     // Reciprocal mean (RRT: 1000/RT) - Basner & Dinges (2011)
-    const rrtSum = valid.reduce((acc, t) => acc + (t.reciprocalRTMs || (1000 / t.reactionTimeMs)), 0);
-    const rrtMean = valid.length > 0 ? Number((rrtSum / valid.length).toFixed(2)) : 0;
+    const rrtSum = filteredValidTrials.reduce((acc, t) => acc + (t.reciprocalRTMs || (1000 / t.reactionTimeMs)), 0);
+    const rrtMean = filteredValidTrials.length > 0 ? Number((rrtSum / filteredValidTrials.length).toFixed(2)) : 0;
 
     // Intra-individual standard deviation (Variability)
     let variance = 0;
@@ -191,15 +245,23 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
       intraIndividualVariability: isv,
       lapsesCount: lapses,
       falseStartsCount: falseStarts,
-      deviceLatencyCalibratedMs: 12, // Standard mobile browser touch sensor compensation
+      deviceLatencyCalibratedMs: calibratedTouchLatencyMs.current, // Dynamic frame-rate touch sensor compensation
       repeatAttemptNumber: attemptCount,
       repeatReason: repeatReason || undefined,
       trials: finalTrials,
     };
 
+    const deviceContext: PVTDeviceContext = {
+      screenRefreshRateHz: measuredHz,
+      deviceLatencyCalibratedMs: calibratedTouchLatencyMs.current,
+      interruptionDetected: interruptionRef.current || interruptionDetected,
+      visibilityChangeDetected: interruptionRef.current || interruptionDetected,
+      touchAnomaliesCount: falseStarts
+    };
+
     setLastSummary(summary);
-    // Update parent summary state without forcefully advancing step so user can review/repeat
-    onComplete(summary);
+    // Update parent summary state with device context
+    onComplete(summary, deviceContext);
   };
 
   // Keyboard spacebar support
@@ -229,9 +291,14 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
                 • {targetTrialCount} ensayos {attemptCount > 1 ? `(Intento #${attemptCount})` : ''}
               </span>
             </h3>
-            <p className="text-[11px] text-slate-500">
-              Línea base histórica del operador: <strong className="text-slate-800">{worker.baseline.meanRT} ms</strong>
-            </p>
+            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+              <span>Línea base: <strong className="text-slate-800">{worker.baseline.meanRT} ms</strong></span>
+              <span>•</span>
+              <span className="flex items-center gap-1 text-slate-600">
+                <Activity className="w-3 h-3 text-emerald-600" />
+                Muestreo: <strong>{measuredHz} Hz</strong> (~{calibratedTouchLatencyMs.current}ms latencia táctil)
+              </span>
+            </div>
           </div>
         </div>
 
@@ -264,12 +331,17 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
             </p>
           </div>
 
-          <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 max-w-sm mx-auto text-[11px] text-slate-600 text-left space-y-1">
-            <div className="flex items-center gap-1.5 text-slate-800 font-medium">
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 max-w-md mx-auto text-[11px] text-slate-600 text-left space-y-1.5">
+            <div className="flex items-center gap-1.5 text-slate-800 font-bold">
               <Clock className="w-3.5 h-3.5 text-amber-600" />
-              <span>Calibración de Entrada y Tolerancia Ambiental:</span>
+              <span>Calibración de Entrada y Tolerancia en Faena:</span>
             </div>
-            <p>Compensación de latencia táctil: <span className="text-emerald-700 font-mono font-semibold">12 ms</span>. Si tienes manos frías o problema de pantalla, podrás repetir el test sin penalización.</p>
+            <p>
+              Compensación de latencia de pantalla: <span className="text-emerald-700 font-mono font-bold">{calibratedTouchLatencyMs.current} ms ({measuredHz} Hz)</span>.
+            </p>
+            <p className="text-[10px] text-slate-500 bg-amber-50/80 p-2 rounded-lg border border-amber-200/80 text-amber-950 font-medium">
+              🧤 <strong>Recomendación Operacional:</strong> Realizar la prueba con manos despejadas (sin guantes gruesos de faena) o activar modo de alta sensibilidad de pantalla táctil. Si presentas rigidez por frío, podrás repetir el test.
+            </p>
           </div>
 
           <button

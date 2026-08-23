@@ -38,7 +38,7 @@ export const HSECView: React.FC<HSECViewProps> = ({
   const [activeTab, setActiveTab] = useState<'analytics' | 'hotspots' | 'roster' | 'investigation' | 'dsm'>('analytics');
 
   const tabs: { id: typeof activeTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'analytics', label: 'Indicadores FRMS & KPIs', icon: <BarChart3 className="w-4 h-4" /> },
+    { id: 'analytics', label: 'Indicadores SGFS & KPIs', icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'hotspots', label: 'Fatigue Hotspots (Matriz)', icon: <Flame className="w-4 h-4" /> },
     { id: 'roster', label: 'Simulador de Roster', icon: <Sliders className="w-4 h-4" /> },
     { id: 'investigation', label: 'Investigación Forense', icon: <FileSearch className="w-4 h-4" /> },
@@ -47,13 +47,13 @@ export const HSECView: React.FC<HSECViewProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 py-2">
-      {/* Top Banner with Core FRMS KPIs */}
+      {/* Top Banner with Core SGFS KPIs */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-amber-600 uppercase tracking-wider">
-                Gestión Integral HSEC & FRMS
+              <span className="text-xs font-bold text-blue-700 uppercase tracking-wider">
+                Gestión Integral HSEC & SGFS
               </span>
               <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200 font-mono font-medium">
                 DS 44 / OHSAS / Estándar Minero
@@ -68,7 +68,7 @@ export const HSECView: React.FC<HSECViewProps> = ({
           </div>
         </div>
 
-        {/* 4 Macro FRMS KPIs */}
+        {/* 4 Macro SGFS KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           {/* Main KPI 1: Fatigue Risk Control Rate */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">

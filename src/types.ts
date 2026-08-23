@@ -1,6 +1,6 @@
 // Global Types for FYS HSEC Oplira (Fatigue Risk Management System v2.0)
 
-export type UserRole = 'worker' | 'personal_profile' | 'supervisor' | 'hsec' | 'health' | 'admin';
+export type UserRole = 'worker' | 'personal_profile' | 'supervisor' | 'hsec' | 'admin';
 
 export type TrafficLightStatus = 'green' | 'yellow' | 'red' | 'gray';
 
@@ -89,7 +89,41 @@ export interface WorkerProfile {
   habitualShiftType?: 'day' | 'night' | 'rotative'; // Diurna, Nocturna, Rotativa
   supervisorName?: string; // Direct Supervisor Name
   supervisorEmail?: string; // Direct Supervisor Email
+  supervisorCode?: string; // e.g. "YTR024" or "SUP-JV-9412"
+  supervisorRut?: string; // Supervisor RUT (locked & immutable)
+  supervisorCompany?: string;
+  savedSupervisors?: SavedSupervisorLink[];
   chronotype?: 'morning' | 'intermediate' | 'evening';
+}
+
+export interface SupervisorCrewProfile {
+  code: string; // e.g. "YTR024"
+  rut: string; // Chilean ID (immutable / non-editable in UI to prevent abuse)
+  name: string; // Full name (immutable / non-editable in UI)
+  company: string;
+  faena: string;
+  area: string;
+  shiftName: string; // e.g. "Turno Día A"
+  email: string;
+  phone?: string;
+  planType: 'pro_crew' | 'enterprise_frms';
+  maxCrewQuota: number; // e.g. 25 operators
+  activeLinkedWorkers: number;
+  isIdentityLocked: boolean; // Always true to enforce anti-reselling integrity
+  createdAt: string;
+  qrPayload: string;
+}
+
+export interface SavedSupervisorLink {
+  code: string;
+  name: string;
+  rut: string;
+  company: string;
+  faena: string;
+  email: string;
+  shiftName?: string;
+  lastUsedDate: string;
+  planStatus: 'active' | 'expired';
 }
 
 export interface SleepRecord {
@@ -163,6 +197,44 @@ export interface FYSPreTurnSurvey {
   };
 }
 
+export interface RiskDriver {
+  category: 'pvt' | 'sleep' | 'circadian' | 'survey' | 'weather' | 'protective';
+  name: string;
+  scoreImpact: number; // e.g. +22 or -12
+  isProtective: boolean;
+  description: string;
+}
+
+export type PVTValidityStatus = 'valid' | 'questionable' | 'invalid';
+
+export interface PVTDeviceContext {
+  screenRefreshRateHz?: number;
+  deviceLatencyCalibratedMs?: number;
+  interruptionDetected?: boolean;
+  visibilityChangeDetected?: boolean;
+  touchAnomaliesCount?: number;
+  batteryLowDetected?: boolean;
+}
+
+export interface OperationalDecision {
+  recommendation: 'normal_operation' | 'controlled_operation' | 'operational_intervention' | 'reassessment_required';
+  decisionLabel: string;
+  mandatoryControls: string[];
+  suggestedControls: string[];
+  supervisorActionTaken?: 'approved_as_recommended' | 'reassigned_equipment' | 'active_pause_applied' | 'temporary_relief' | 'supervisor_override';
+  supervisorActionNotes?: string;
+  supervisorActionTimestamp?: string;
+}
+
+export interface LegalComplianceMetadata {
+  signatureStandard: 'FES_LEY_19799'; // Firma Electrónica Simple con Sellado Criptográfico
+  dataProtectionStandard: 'LEY_21719_MINIMIZACION'; // Tratamiento proporcional según Ley 21.719
+  legalLaborBase: 'ART_184_CODIGO_DEL_TRABAJO';
+  evidenceIntegrityHash: string; // SHA-256
+  schemaVersion: number;
+  fraAlgorithmVersion: string;
+}
+
 export interface FRARiskEvaluation {
   id: string;
   workerId: string;
@@ -171,6 +243,7 @@ export interface FRARiskEvaluation {
   statusLabel: string;
   riskScore: number; // 0-100 (0=Safe, 100=Extreme risk)
   confidenceScore: number; // 0-100%
+  dataQualityScore: number; // 0-100%
   
   // Survey responses included
   fysSurvey?: FYSPreTurnSurvey;
@@ -185,11 +258,22 @@ export interface FRARiskEvaluation {
   circadianPhase: 'peak_alertness' | 'intermediate' | 'trough_critical_nadir'; // Nadir: 03:00 - 06:00
   altitudeImpact: 'low' | 'moderate' | 'high';
   
-  // Explainability
+  // Explainability & Risk Drivers
   primaryFactors: string[];
+  riskDrivers?: RiskDriver[];
   recommendedAction: string;
   actionDetails: string;
+  operationalDecision?: OperationalDecision;
   
+  // Data Quality & Device Context
+  pvtValidity?: PVTValidityStatus;
+  pvtQualityScore?: number;
+  deviceContext?: PVTDeviceContext;
+  
+  // Legal & Regulatory Standards
+  legalCompliance?: LegalComplianceMetadata;
+  fraAlgorithmVersion?: string;
+
   // Signatures & Operational Validation
   workerSignature?: string; // Base64 data URL of handwritten canvas signature
   workerSignatureTimestamp?: string;
@@ -197,6 +281,9 @@ export interface FRARiskEvaluation {
   supervisorSignatureTimestamp?: string;
   supervisorApprovalNotes?: string;
   supervisorNotes?: string;
+  supervisorCode?: string; // e.g. "YTR024"
+  supervisorRut?: string; // e.g. "12.345.678-9"
+  supervisorName?: string;
 
   // Integrity & Traceability
   hashSha256: string;
@@ -214,31 +301,12 @@ export interface InterventionRecord {
   evaluationId: string;
   supervisorId: string;
   timestamp: string;
-  interventionType: 'active_break_15m' | 'controlled_nap_25m' | 'equipment_rotation' | 'task_reassignment' | 'temporary_relief' | 'health_referral';
+  interventionType: 'active_break_15m' | 'controlled_nap_25m' | 'equipment_rotation' | 'task_reassignment' | 'temporary_relief';
   customNotes?: string;
   status: 'pending' | 'in_progress' | 'completed' | 'reevaluated';
   recoveryOutcome?: 'recovered_green' | 'partial_yellow' | 'unrecovered_red' | 'inconclusive_gray';
   completedAt?: string;
   reevaluationId?: string;
-}
-
-export interface StopBangRecord {
-  id: string;
-  workerId: string;
-  date: string;
-  snoring: boolean;
-  tiredness: boolean;
-  observedApnea: boolean;
-  highBloodPressure: boolean;
-  bmiOver35: boolean;
-  ageOver50: boolean;
-  neckCircumferenceOver40cm: boolean;
-  genderMale: boolean;
-  totalScore: number; // 0 - 8
-  riskCategory: 'low' | 'intermediate' | 'high';
-  medicalRecommendation: string;
-  referredToSleepStudy: boolean;
-  doctorNotes?: string;
 }
 
 export interface ShiftRosterConfig {

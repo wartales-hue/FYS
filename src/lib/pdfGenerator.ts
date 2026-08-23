@@ -5,6 +5,27 @@ import { Share } from '@capacitor/share';
 import { WorkerProfile, FRARiskEvaluation, PVTSummary, SleepRecord } from '../types';
 import { LEVEL_CONTROL_MEASURES } from './controlMeasures';
 import { drawVectorGuillocheSecurityBackground } from './guillocheDrawer';
+import { isPremiumActive } from './premiumService';
+import { isSupervisorPaid } from './supervisorCrewManager';
+
+export function getPdfEvaluationCount(): number {
+  try {
+    const raw = localStorage.getItem('frms_pdf_evaluations_generated_count');
+    return raw ? parseInt(raw, 10) || 0 : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+export function incrementPdfEvaluationCount(): number {
+  try {
+    const next = getPdfEvaluationCount() + 1;
+    localStorage.setItem('frms_pdf_evaluations_generated_count', String(next));
+    return next;
+  } catch (e) {
+    return 1;
+  }
+}
 
 /**
  * Strips any opaque white or near-white background from a signature dataURL
@@ -60,6 +81,18 @@ export function generateEvaluationPDF(
   const contentWidth = pageWidth - (margin * 2); // 190mm
   const c1 = margin + 3.0;
   const evalDate = new Date(evaluation.timestamp).toLocaleString('es-CL');
+
+  // Gating for Empresa & Faena (Free tier has 30 evaluations with company & faena; evaluation 31+ is masked unless paid)
+  const isPaid = isPremiumActive(worker.rut, worker.supervisorRut) || isSupervisorPaid(worker.supervisorCode);
+  const evalCount = getPdfEvaluationCount();
+  const allowCompanyAndFaena = isPaid || evalCount <= 30;
+
+  const displayCompany = allowCompanyAndFaena 
+    ? (worker.company || 'Minera') 
+    : '[Bloqueado - Disponible en Versión de Pago]';
+  const displayFaena = allowCompanyAndFaena 
+    ? (worker.faena || 'Faena Operacional') 
+    : '[Bloqueado - Disponible en Versión de Pago]';
 
   // ==========================================
   // PAGE 1: EVALUACIÓN PRINCIPAL Y FIRMAS
@@ -158,7 +191,7 @@ export function generateEvaluationPDF(
   doc.setFontSize(6.2);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
-  doc.text(`Emisión: ${evalDate}   |   ID Certificado: ${evaluation.id}   |   Faena: ${worker.faena || 'Faena Operacional'} (${worker.altitudeMeters || 3800} msnm)`, margin, y);
+  doc.text(`Emisión: ${evalDate}   |   ID Certificado: ${evaluation.id}   |   Faena: ${displayFaena} (${worker.altitudeMeters || 3800} msnm)`, margin, y);
 
   y += 2.5;
   doc.setDrawColor(180, 205, 225);
@@ -202,7 +235,7 @@ export function generateEvaluationPDF(
   doc.setFont('helvetica', 'bold');
   doc.text('Empresa/Cargo:', c1, rowY);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${worker.company || 'Minera'} — ${worker.role || 'Operador'}`, c1 + 20, rowY, { maxWidth: halfW - 22 });
+  doc.text(`${displayCompany} — ${worker.role || 'Operador'}`, c1 + 20, rowY, { maxWidth: halfW - 22 });
 
   doc.setFont('helvetica', 'bold');
   doc.text('Equipo:', c2, rowY);
@@ -226,7 +259,7 @@ export function generateEvaluationPDF(
   doc.setFont('helvetica', 'bold');
   doc.text('Área / Faena:', c1, rowY);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${worker.area || 'Operaciones'} — ${worker.faena || 'Faena'} (${worker.altitudeMeters || 3800} msnm)`, c1 + 18, rowY, { maxWidth: halfW - 20 });
+  doc.text(`${worker.area || 'Operaciones'} — ${displayFaena} (${worker.altitudeMeters || 3800} msnm)`, c1 + 18, rowY, { maxWidth: halfW - 20 });
 
   doc.setFont('helvetica', 'bold');
   doc.text('GPS Faena:', c2, rowY);
@@ -368,17 +401,17 @@ export function generateEvaluationPDF(
   let sec3RowY = y + 14.5;
 
   // A. Detalle de Sueño y Deuda
-  doc.setFontSize(6.0);
+  doc.setFontSize(5.8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 100, 170);
   doc.text('A. Sueño y Deuda Circadiana:', c1, sec3RowY);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(15, 23, 42);
   doc.text(
-    `Sueño: ${sleepHrs} hrs  |  Oportunidad: ${sleepRecord?.sleepOpportunityHours ?? 10} hrs  |  Horario: ${sleepRecord?.bedTime || '23:00'} a ${sleepRecord?.wakeTime || '05:30'}  |  Calidad: ${sleepRecord?.sleepQuality ?? 3}/5  |  Noches consecutivas: ${sleepRecord?.consecutiveNights ?? 0}`,
-    c1 + 35,
+    `Sueño: ${sleepHrs} hrs | Oportunidad: ${sleepRecord?.sleepOpportunityHours ?? 10} hrs | Horario: ${sleepRecord?.bedTime || '23:00'} a ${sleepRecord?.wakeTime || '05:30'} | Calidad: ${sleepRecord?.sleepQuality ?? 3}/5 | Noches consec.: ${sleepRecord?.consecutiveNights ?? 0}`,
+    c1 + 33,
     sec3RowY,
-    { maxWidth: contentWidth - 40 }
+    { maxWidth: contentWidth - 38 }
   );
 
   // B. Detalle KSS & Nivel de Alerta
@@ -389,10 +422,10 @@ export function generateEvaluationPDF(
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(15, 23, 42);
   doc.text(
-    `Score: ${evaluation.kss}/9  |  Nivel: ${evaluation.kss >= 7 ? 'Somnoliento' : evaluation.kss >= 5 ? 'Neutro / Alerta media' : 'Completamente Alerta'}  |  Fase Circadiana: ${evaluation.circadianPhase === 'trough_critical_nadir' ? 'Nadir Crítico (03:00-06:00)' : 'Ventana Operativa Estándar'}`,
-    c1 + 35,
+    `Score: ${evaluation.kss}/9 | Nivel: ${evaluation.kss >= 7 ? 'Somnoliento' : evaluation.kss >= 5 ? 'Neutro / Alerta media' : 'Completamente Alerta'} | Fase Circadiana: ${evaluation.circadianPhase === 'trough_critical_nadir' ? 'Nadir Crítico (03:00-06:00)' : 'Ventana Operativa Estándar'}`,
+    c1 + 33,
     sec3RowY,
-    { maxWidth: contentWidth - 40 }
+    { maxWidth: contentWidth - 38 }
   );
 
   // C. Encuesta FYS y Controles Clínicos
@@ -405,11 +438,11 @@ export function generateEvaluationPDF(
   doc.setTextColor(15, 23, 42);
   doc.text(
     survey
-      ? `Energía: ${survey.energyToStartShift ? 'SÍ' : 'NO'}  |  Cansancio: ${survey.significantPhysicalFatigue ? 'SÍ' : 'NO'}  |  Dolor/Molestia: ${survey.painAffectingDriving ? 'SÍ' : 'NO'}  |  Fármacos: ${survey.medicationsOrDrugsConsumed ? 'DECLARADO' : 'NO'}  |  Alcohol 12h: ${survey.alcoholConsumedLast12Hours ? 'ALERTA' : '0.00 (Cero)'}`
+      ? `Energía: ${survey.energyToStartShift ? 'SÍ' : 'NO'} | Cansancio: ${survey.significantPhysicalFatigue ? 'SÍ' : 'NO'} | Dolor: ${survey.painAffectingDriving ? 'SÍ' : 'NO'} | Fármacos: ${survey.medicationsOrDrugsConsumed ? 'DECLARADO' : 'NO'} | Alcohol 12h: ${survey.alcoholConsumedLast12Hours ? 'ALERTA' : '0.00 (Cero)'}`
       : 'Declaración jurada conforme sin novedades clínicas ni fármacos declarados',
-    c1 + 35,
+    c1 + 33,
     sec3RowY,
-    { maxWidth: contentWidth - 40 }
+    { maxWidth: contentWidth - 38 }
   );
 
   // C2. Factores Nocturnos (si aplica)
@@ -421,16 +454,16 @@ export function generateEvaluationPDF(
   doc.setTextColor(51, 65, 85);
   doc.text(
     survey?.nightQuestions
-      ? `Bostezos/Pesadez: ${survey.nightQuestions.yawningOrHeavyEyelids ? 'SÍ' : 'NO'}  |  Hidratado/Nutrido: ${survey.nightQuestions.hydratedAndNourished ? 'SÍ' : 'NO'}  |  Descanso Diurno: ${survey.nightQuestions.daytimeSleepEnvironment === 'optimal' ? 'Óptimo' : 'Regular'}  |  Luz Cabina: ${survey.nightQuestions.cabinLightingCondition === 'optimal' ? 'Óptima' : 'Parcial'}`
-      : `Turno diurno regular — Control de hidratación y ventilación en cabina activo`,
-    c1 + 40,
+      ? `Bostezos/Pesadez: ${survey.nightQuestions.yawningOrHeavyEyelids ? 'SÍ' : 'NO'} | Hidratado: ${survey.nightQuestions.hydratedAndNourished ? 'SÍ' : 'NO'} | Descanso Diurno: ${survey.nightQuestions.daytimeSleepEnvironment === 'optimal' ? 'Óptimo' : 'Regular'} | Luz Cabina: ${survey.nightQuestions.cabinLightingCondition === 'optimal' ? 'Óptima' : 'Parcial'}`
+      : `Turno diurno regular — Control preventivo de hidratación y ventilación en cabina activo`,
+    c1 + 38,
     sec3RowY,
-    { maxWidth: contentWidth - 45 }
+    { maxWidth: contentWidth - 43 }
   );
 
   // D. Medición Psicomotora PVT Detallada
   sec3RowY += 4.0;
-  doc.setFontSize(6.0);
+  doc.setFontSize(5.6);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 100, 170);
   doc.text('D. Test Psicomotor PVT:', c1, sec3RowY);
@@ -441,16 +474,15 @@ export function generateEvaluationPDF(
   const pvtRRT = pvtSummary?.rrtMean ? pvtSummary.rrtMean.toFixed(2) : (1000 / medianVal).toFixed(2);
   const pvtTrials = pvtSummary?.validTrials || pvtSummary?.totalTrials || 5;
   doc.text(
-    `Mediana: ${medianVal} ms  |  Media: ${pvtMean} ms  |  Variabilidad (SD): ${pvtSD} ms  |  RRT: ${pvtRRT}  |  Ensayos: ${pvtTrials}  |  Lapsos (≥500ms): ${pvtSummary?.lapsesCount ?? 0}  |  Anticipaciones: ${pvtSummary?.falseStartsCount ?? 0}`,
-    c1 + 35,
+    `Mediana: ${medianVal} ms | Media: ${pvtMean} ms | SD: ${pvtSD} ms | RRT: ${pvtRRT} | Ensayos: ${pvtTrials} | Lapsos (>=500ms): ${pvtSummary?.lapsesCount ?? 0} | Anticipaciones: ${pvtSummary?.falseStartsCount ?? 0}`,
+    c1 + 33,
     sec3RowY,
-    { maxWidth: contentWidth - 40 }
+    { maxWidth: contentWidth - 38 }
   );
 
   y += sec3H + 2.5;
 
   // 7. Section 4: Diagnóstico FRA y Medidas de Control Operacionales Aceptadas
-  // CORRECTION: Clean dynamic layout preventing any text overflow or overlapping lines!
   doc.setFontSize(7.2);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
@@ -458,13 +490,13 @@ export function generateEvaluationPDF(
 
   y += 1.8;
   const currentPlan = LEVEL_CONTROL_MEASURES[evaluation.status] || LEVEL_CONTROL_MEASURES.green;
-  const sec4H = 58; // Generous height for diagnostic title, 4 measures and formal worker commitment
+  const sec4H = 58; // Box height
   doc.setDrawColor(180, 205, 225);
   doc.setLineWidth(0.35);
   doc.roundedRect(margin, y, contentWidth, sec4H, 1.2, 1.2, 'S');
 
   let sec4RowY = y + 3.6;
-  doc.setFontSize(7.0);
+  doc.setFontSize(6.8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text(
@@ -473,48 +505,63 @@ export function generateEvaluationPDF(
     sec4RowY
   );
 
-  sec4RowY += 3.6;
-  doc.setFontSize(6.4);
+  sec4RowY += 3.5;
+  doc.setFontSize(6.2);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 100, 170);
   doc.text(`Medidas de Control Operacionales Requeridas para el Turno (${currentPlan.title.split(':')[0]}):`, c1, sec4RowY);
 
-  // Render 4 Level Control Measures with clean vertical flow and no overlap
+  sec4RowY += 1.2;
+
+  // Render 4 Level Control Measures with dynamic multi-line calculation to prevent any overlap
   currentPlan.measures.slice(0, 4).forEach((measure, idx) => {
-    sec4RowY += 3.8;
-    doc.setFontSize(6.0);
+    sec4RowY += 2.8;
+    doc.setFontSize(5.6);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    const titleText = `${idx + 1}. ${measure.title}:`;
-    doc.text(titleText, c1 + 1.5, sec4RowY);
+    const titleText = `${idx + 1}. ${measure.title}: `;
+    const titleW = doc.getTextWidth(titleText) + 1.0;
+    doc.text(titleText, c1 + 1.0, sec4RowY);
 
-    const titleW = doc.getTextWidth(titleText) + 2.0;
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(51, 65, 85);
     
-    // Fit description within remaining width
+    // Clean string from special characters
+    const cleanDesc = measure.description
+      .replace(/CO₂/g, 'CO2')
+      .replace(/CO ‚/g, 'CO2')
+      .replace(/–/g, '-');
+
     const maxDescW = contentWidth - 6 - titleW;
-    doc.text(measure.description, c1 + 1.5 + titleW, sec4RowY, { maxWidth: maxDescW });
+    const descLines = doc.splitTextToSize(cleanDesc, maxDescW);
+
+    if (descLines.length > 0) {
+      doc.text(descLines[0], c1 + 1.0 + titleW, sec4RowY);
+      for (let l = 1; l < descLines.length; l++) {
+        sec4RowY += 2.6;
+        doc.text(descLines[l], c1 + 1.0 + titleW, sec4RowY);
+      }
+    }
   });
 
   // Explicit Worker Commitment text box line
-  sec4RowY += 5.2;
+  sec4RowY += 4.2;
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.3);
-  doc.line(c1, sec4RowY - 1.2, margin + contentWidth - 3.0, sec4RowY - 1.2);
+  doc.line(c1, sec4RowY - 1.0, margin + contentWidth - 3.0, sec4RowY - 1.0);
 
-  doc.setFontSize(6.2);
+  doc.setFontSize(5.8);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text('Compromiso Operacional Aceptado por el Trabajador:', c1, sec4RowY + 1.8);
+  doc.text('Compromiso Operacional Aceptado por el Trabajador:', c1, sec4RowY + 1.6);
   
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(15, 23, 42);
   doc.text(
     '"Me comprometo a cumplir las medidas de control propuestas, además de las indicadas por el supervisor y la empresa."',
-    c1 + 60,
-    sec4RowY + 1.8,
-    { maxWidth: contentWidth - 64 }
+    c1 + 58,
+    sec4RowY + 1.6,
+    { maxWidth: contentWidth - 62 }
   );
 
   y += sec4H + 2.5;
@@ -753,13 +800,19 @@ export function generateEvaluationPDF(
   surveyQuestions.forEach((item) => {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(`${item.num}. ${item.q}`, c1, surveyY);
+    doc.text(`${item.num}. ${item.q}`, c1, surveyY, { maxWidth: contentWidth - 6 });
 
+    surveyY += 3.0;
     doc.setFont('helvetica', item.isAlert ? 'bold' : 'normal');
     doc.setTextColor(item.isAlert ? 185 : 51, item.isAlert ? 28 : 65, item.isAlert ? 28 : 85);
-    doc.text(`➔  ${item.resp}`, c1 + 4, surveyY + 3.0, { maxWidth: contentWidth - 8 });
+    const cleanResp = item.resp.replace(/–/g, '-').replace(/—/g, '-');
+    const respLines = doc.splitTextToSize(`•  ${cleanResp}`, contentWidth - 12);
+    respLines.forEach((rLine: string) => {
+      doc.text(rLine, c1 + 4, surveyY);
+      surveyY += 2.6;
+    });
 
-    surveyY += 6.8;
+    surveyY += 1.0;
   });
 
   p2y += sec6H + 3.0;
@@ -780,61 +833,73 @@ export function generateEvaluationPDF(
 
   const scientificStudies = [
     {
-      titleEn: '1. Basner, M., & Dinges, D. F. (2011) — "Maximizing Sensitivity of the Psychomotor Vigilance Test (PVT) to Sleep Loss"',
+      titleEn: '1. Basner, M., & Dinges, D. F. (2011) - "Maximizing Sensitivity of the Psychomotor Vigilance Test (PVT) to Sleep Loss"',
       journal: 'Sleep, 34(5), 581-591. doi:10.1093/sleep/34.5.581',
       descEs: 'Valida la sensibilidad métrica de la mediana y la tasa recíproca (RRT: 1000/RT) para detectar con máxima fidelidad la degradación de la atención sostenida, lapsos (>500ms) y velocidad de procesamiento psicomotor derivados de la restricción y pérdida de sueño.'
     },
     {
-      titleEn: '2. Åkerstedt, T., & Gillberg, M. (1990) — "Subjective and Objective Sleepiness in the Active Individual"',
+      titleEn: '2. Åkerstedt, T., & Gillberg, M. (1990) - "Subjective and Objective Sleepiness in the Active Individual"',
       journal: 'International Journal of Neuroscience, 52(1-2), 29-37.',
       descEs: 'Estandarización de la Escala de Somnolencia de Karolinska (KSS 1 a 9), demostrando su correlación directa con la actividad electroencefalográfica (ondas alfa/theta en EEG), intrusión de microsueños y fatiga subjetiva en operadores de turnos rotativos.'
     },
     {
-      titleEn: '3. Dawson, D., & McCulloch, K. (2005) — "Managing Fatigue: It’s about sleep"',
+      titleEn: '3. Dawson, D., & McCulloch, K. (2005) - "Managing Fatigue: It is about sleep"',
       journal: 'Sleep Medicine Reviews, 9(5), 365-380.',
       descEs: 'Establece el modelo de cuantificación de deuda acumulada de sueño y la ventana de oportunidad de descanso (horas previas) como el factor biomatemático primario en la predicción del error humano e incidentes en operaciones industriales continuas.'
     },
     {
-      titleEn: '4. West, J. B. (2012) — "High-Altitude Medicine and Biology / Hypobaric Hypoxia in Mining Operations"',
+      titleEn: '4. West, J. B. (2012) - "High-Altitude Medicine and Biology / Hypobaric Hypoxia in Mining Operations"',
       journal: 'High Altitude Medicine & Biology, 13(3), 147-151.',
       descEs: 'Estudio de la hipoxia hipobárica en gran altitud (>2.500 y >3.800 msnm), evidenciando cómo la menor presión de oxígeno fragmenta la arquitectura del sueño REM/NREM, reduce la saturación de oxígeno arterial y acelera la fatiga cognitiva del operador.'
     },
     {
-      titleEn: '5. Van Dongen, H. P. A., Maislin, G., Mullington, J. M., & Dinges, D. F. (2003) — "The Cumulative Cost of Additional Wakefulness"',
+      titleEn: '5. Van Dongen, H. P. A., Maislin, G., Mullington, J. M., & Dinges, D. F. (2003) - "The Cumulative Cost of Additional Wakefulness"',
       journal: 'Sleep, 26(2), 117-126.',
-      descEs: 'Demuestra el efecto acumulativo de la restricción crónica moderada de sueño (≤6 horas por noche durante días sucesivos de turno), generando un deterioro neuroconductual equivalente al de una privación total de sueño de 24 a 48 horas continuas.'
+      descEs: 'Demuestra el efecto acumulativo de la restricción crónica moderada de sueño (<=6 horas por noche durante días sucesivos de turno), generando un deterioro neuroconductual equivalente al de una privación total de sueño de 24 a 48 horas continuas.'
     },
     {
-      titleEn: '6. Hursh, S. R., Redmond, D. P., Johnson, M. L., et al. (2004) — "Fatigue Avoidance Scheduling Tool (FAST) & SAFTE Model"',
+      titleEn: '6. Hursh, S. R., Redmond, D. P., Johnson, M. L., et al. (2004) - "Fatigue Avoidance Scheduling Tool (FAST) & SAFTE Model"',
       journal: 'Aviation, Space, and Environmental Medicine, 75(3), A44-A57.',
       descEs: 'Bases del modelamiento biomatemático del rendimiento humano, incorporando la interacción del ritmo circadiano (nadir biológico 03:00-06:00), la inercia del sueño y la velocidad de recuperación biológica durante el descanso.'
     },
     {
-      titleEn: '7. Ministerio de Salud de Chile (MINSAL) — "Guía Técnica sobre Trabajo en Gran Altitud Geográfica"',
+      titleEn: '7. Ministerio de Salud de Chile (MINSAL) - "Guía Técnica sobre Trabajo en Gran Altitud Geográfica"',
       journal: 'Decreto Supremo N° 28 / D.S. N° 44 / Circular SUSESO N° 3.655.',
       descEs: 'Marco normativo chileno para la vigilancia de la salud, aclimatación, gestión del riesgo de hipobaria intermitente crónica y medidas de mitigación preventiva de fatiga y somnolencia en faenas mineras e industriales.'
     }
   ];
 
   scientificStudies.forEach((st) => {
-    doc.setFontSize(6.0);
+    doc.setFontSize(5.8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 80, 150);
-    doc.text(st.titleEn, c1, sciY, { maxWidth: contentWidth - 6 });
+    const titleLines = doc.splitTextToSize(st.titleEn, contentWidth - 8);
+    titleLines.forEach((tLine: string) => {
+      doc.text(tLine, c1, sciY);
+      sciY += 2.8;
+    });
 
-    sciY += 3.2;
-    doc.setFontSize(5.0);
+    doc.setFontSize(4.9);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(100, 116, 139);
-    doc.text(`Publicación: ${st.journal}`, c1 + 2, sciY, { maxWidth: contentWidth - 8 });
+    doc.text(`Publicación: ${st.journal}`, c1 + 2, sciY, { maxWidth: contentWidth - 10 });
+    sciY += 2.5;
 
-    sciY += 2.8;
-    doc.setFontSize(5.5);
+    doc.setFontSize(5.2);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(51, 65, 85);
-    doc.text(`➔ Descripción: ${st.descEs}`, c1 + 2, sciY, { maxWidth: contentWidth - 8 });
+    const cleanDesc = st.descEs
+      .replace(/≤/g, '<=')
+      .replace(/≥/g, '>=')
+      .replace(/–/g, '-')
+      .replace(/—/g, '-');
+    const descLines = doc.splitTextToSize(`• Descripción: ${cleanDesc}`, contentWidth - 10);
+    descLines.forEach((dLine: string) => {
+      doc.text(dLine, c1 + 2, sciY);
+      sciY += 2.4;
+    });
 
-    sciY += 9.5;
+    sciY += 1.8;
   });
 
   p2y += sec7H + 3.0;
@@ -857,7 +922,7 @@ export function generateEvaluationPDF(
   doc.setTextColor(51, 65, 85);
 
   doc.text(
-    '• Decreto Supremo N° 44/2024 (Reglamento sobre Gestión Preventiva de Riesgos Laborales): Obligatoriedad de implementar sistemas de detección y control de fatiga en puestos de alta criticidad operacional.',
+    '• Ley N° 19.799 (Documentos y Firma Electrónica): Firma Electrónica Simple (FES) con sellado temporal y cadena de custodia criptográfica SHA-256 para validez e integridad probatoria preventiva (Art. 3 Ley 19.799).',
     c1,
     legY,
     { maxWidth: contentWidth - 6 }
@@ -865,7 +930,7 @@ export function generateEvaluationPDF(
 
   legY += 4.0;
   doc.text(
-    '• Ley N° 21.719 (Protección de Datos Personales y Datos Sensibles de Salud): Tratamiento exclusivo para la prevención de accidentes laborales, bajo estricta confidencialidad, no transferibilidad y almacenamiento cifrado.',
+    '• Ley N° 21.719 (Protección de Datos Personales) y Art. 184 Código del Trabajo: Tratamiento bajo principios de minimización, confidencialidad estricta y finalidad exclusivamente preventiva en seguridad y salud laboral.',
     c1,
     legY,
     { maxWidth: contentWidth - 6 }
@@ -873,7 +938,7 @@ export function generateEvaluationPDF(
 
   legY += 4.0;
   doc.text(
-    '• Circular SUSESO N° 3.655 y Art. 184 del Código del Trabajo: Deber de protección eficaz de la vida y salud de los trabajadores en faena minera, garantizando condiciones óptimas antes de operar maquinaria o vehículos.',
+    '• Decreto Supremo N° 44/2024 y Circular SUSESO N° 3.655: Deber de gestión y control del riesgo de fatiga y somnolencia pre-turno en faenas mineras e industriales de alta criticidad.',
     c1,
     legY,
     { maxWidth: contentWidth - 6 }
@@ -923,6 +988,7 @@ export async function downloadEvaluationPDF(
   sleepRecord?: Partial<SleepRecord>,
   pvtSummary?: Partial<PVTSummary>
 ): Promise<boolean> {
+  incrementPdfEvaluationCount();
   const doc = generateEvaluationPDF(worker, evaluation, sleepRecord, pvtSummary);
   const filename = getPDFFileName(worker, evaluation);
 
@@ -932,14 +998,14 @@ export async function downloadEvaluationPDF(
       try {
         const base64Data = doc.output('datauristring').split(',')[1];
         
-        // Write to Cache directory first for sharing / opening
+        // Write to Cache directory for sharing / immediate opening
         const result = await Filesystem.writeFile({
           path: filename,
           data: base64Data,
           directory: Directory.Cache
         });
 
-        // Also write a copy to Documents / Download folder
+        // Also write a copy to Documents directory for permanent access on device
         try {
           await Filesystem.writeFile({
             path: filename,
@@ -950,13 +1016,12 @@ export async function downloadEvaluationPDF(
           console.warn('Documents save note:', docErr);
         }
 
-        // Open native Android Share/Save sheet
-        await Share.share({
-          title: 'Certificado Oficial Oplira FYS',
-          text: `Certificado HSEC para ${worker.name} (${worker.rut}) - ${evaluation.statusLabel.toUpperCase()}`,
-          url: result.uri,
-          dialogTitle: 'Guardar o Compartir Certificado PDF'
-        });
+        // Save via jsPDF fallback in webview
+        try {
+          doc.save(filename);
+        } catch (saveErr) {
+          // ignore
+        }
 
         return true;
       } catch (nativeErr) {
@@ -964,46 +1029,32 @@ export async function downloadEvaluationPDF(
       }
     }
 
-    // 2. Standard Web Browser & Mobile Browser handling
+    // 2. Direct Blob URL download with programmatic link click
     const blob = doc.output('blob');
-
-    // Web Share API on mobile browsers
-    const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent || '');
-    if (isMobile && typeof navigator.share === 'function') {
-      try {
-        const file = new File([blob], filename, { type: 'application/pdf' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: 'Certificado Oficial Oplira FYS',
-            text: `Certificado HSEC de fatiga y somnolencia para ${worker.name} (${worker.rut}).`
-          });
-          return true;
-        }
-      } catch (shareErr: any) {
-        if (shareErr?.name !== 'AbortError') {
-          console.warn('Mobile native share fallback:', shareErr);
-        }
-      }
-    }
-
-    // 3. Fallback: Blob URL download for standard web
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.style.display = 'none';
     a.href = url;
     a.download = filename;
-    a.target = '_blank';
     document.body.appendChild(a);
     a.click();
 
     setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 2000);
+      try {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (cleanupErr) {
+        // ignore
+      }
+    }, 3000);
 
-    // Also trigger jsPDF internal save
-    doc.save(filename);
+    // Also trigger jsPDF save method for universal compatibility
+    try {
+      doc.save(filename);
+    } catch (saveErr) {
+      console.warn('jsPDF save note:', saveErr);
+    }
+
     return true;
   } catch (e) {
     console.error('Error downloading PDF:', e);

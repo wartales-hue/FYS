@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   CheckCircle, 
   Moon, 
@@ -36,16 +36,17 @@ import {
   RotateCw,
   CheckCircle2
 } from 'lucide-react';
-import { WorkerProfile, SleepRecord, PVTSummary, FRARiskEvaluation, FYSPreTurnSurvey } from '../../types';
+import { WorkerProfile, SleepRecord, PVTSummary, FRARiskEvaluation, FYSPreTurnSurvey, PVTDeviceContext } from '../../types';
 import { InteractivePVT } from './InteractivePVT';
 import { FYSPreTurnSurveyComponent } from './FYSPreTurnSurveyComponent';
 import { SignaturePad } from './SignaturePad';
 import { evaluateFRARisk } from '../../lib/fraEngine';
-import { downloadEvaluationPDF, shareEvaluationPDFNative, openEvaluationPDFPreview } from '../../lib/pdfGenerator';
+import { downloadEvaluationPDF, shareEvaluationPDFNative, openEvaluationPDFPreview, getPdfEvaluationCount } from '../../lib/pdfGenerator';
 import { 
   enqueueSupervisorDispatch, 
   drainSupervisorQueue, 
   getSupervisorQueue, 
+  subscribeToQueue,
   openSupervisorEmailClient, 
   shareSupervisorWhatsApp, 
   PendingSupervisorDispatch 
@@ -53,22 +54,57 @@ import {
 import { LEVEL_CONTROL_MEASURES, ControlMeasureItem } from '../../lib/controlMeasures';
 import { OpliraLogo } from '../OpliraLogo';
 import { WeatherManualEditModal } from '../WeatherManualEditModal';
-import { Edit2, Thermometer, WifiOff, Share2, ExternalLink, RefreshCw, Send, Check } from 'lucide-react';
+import { DEFAULT_SAMPLE_WEATHER } from '../../lib/mockData';
+import { SupervisorLinkSelectorModal } from './SupervisorLinkSelectorModal';
+import { 
+  findSupervisorByCode, 
+  getActiveSupervisorCode, 
+  getSavedSupervisorsForWorker,
+  isSupervisorPaid
+} from '../../lib/supervisorCrewManager';
+import { SupervisorCrewProfile, SavedSupervisorLink } from '../../types';
+import { Edit2, Thermometer, WifiOff, Share2, ExternalLink, RefreshCw, Send, Check, Users, QrCode } from 'lucide-react';
+import { DigitalPassModal } from './DigitalPassModal';
+import { AdBanner } from '../AdBanner';
+
+// Helper to retrieve last evaluation input from localStorage
+const getPreviousEvaluationDefaults = () => {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = localStorage.getItem('fys_last_evaluation_inputs');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    }
+  } catch (e) {}
+  return null;
+};
 
 interface CheckInFlowProps {
   worker: WorkerProfile;
   onCheckInComplete: (evaluation: FRARiskEvaluation) => void;
+  onUpdateWorker?: (worker: WorkerProfile) => void;
   disabled?: boolean;
 }
 
 export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   worker,
   onCheckInComplete,
+  onUpdateWorker,
   disabled = false,
 }) => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(1);
 
   // Dynamic Shift System in Evaluation
+  const [shiftPattern, setShiftPattern] = useState<string>(
+    worker.shiftPattern || worker.currentShift?.rosterPattern || '7x7'
+  );
+  const [habitualShiftType, setHabitualShiftType] = useState<'day' | 'night' | 'rotative'>(
+    worker.habitualShiftType || (worker.currentShift?.type === 'night' ? 'night' : 'day')
+  );
+  const [customWorkDays, setCustomWorkDays] = useState<number>(4);
+  const [customRestDays, setCustomRestDays] = useState<number>(4);
+
   const [evaluationShiftType, setEvaluationShiftType] = useState<'day' | 'night'>(
     worker.currentShift?.type === 'night' ? 'night' : 'day'
   );
@@ -77,24 +113,114 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   );
   const [isShiftSwitch, setIsShiftSwitch] = useState<boolean>(false);
 
+  // Immediate Bidirectional Sync for Shift Pattern
+  const handleShiftPatternChange = (newPattern: string) => {
+    setShiftPattern(newPattern);
+    const updatedWorker: WorkerProfile = {
+      ...worker,
+      shiftPattern: newPattern,
+      currentShift: {
+        ...worker.currentShift,
+        rosterPattern: newPattern,
+      }
+    };
+    onUpdateWorker?.(updatedWorker);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(`fys_profile_${worker.id}`, JSON.stringify(updatedWorker));
+      }
+    } catch (e) {
+      console.warn('Error saving updated shiftPattern:', e);
+    }
+  };
+
+  // Immediate Bidirectional Sync for Habitual Shift Type
+  const handleHabitualShiftTypeChange = (newHabitual: 'day' | 'night' | 'rotative') => {
+    setHabitualShiftType(newHabitual);
+    const updatedWorker: WorkerProfile = {
+      ...worker,
+      habitualShiftType: newHabitual,
+    };
+    onUpdateWorker?.(updatedWorker);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(`fys_profile_${worker.id}`, JSON.stringify(updatedWorker));
+      }
+    } catch (e) {
+      console.warn('Error saving updated habitualShiftType:', e);
+    }
+  };
+
   // Weather Customization & Offline Forecast State
   const [customWeather, setCustomWeather] = useState(worker.weather);
   const [showWeatherModal, setShowWeatherModal] = useState<boolean>(false);
 
-  // Step 2: FYS Pre-Turn Survey State
-  const [fysSurvey, setFysSurvey] = useState<FYSPreTurnSurvey>({
-    energyToStartShift: true,
-    significantPhysicalFatigue: false,
-    painAffectingDriving: false,
-    medicationsOrDrugsConsumed: false,
-    alcoholConsumedLast12Hours: false,
-    nightQuestions: (worker.currentShift?.type === 'night' || evaluationShiftType === 'night') ? {
-      yawningOrHeavyEyelids: false,
-      hydratedAndNourished: true,
-      excessEnergyDrinks: false,
-      daytimeSleepEnvironment: 'optimal',
-      cabinLightingCondition: 'optimal',
-    } : undefined
+  // Supervisor Cuadrilla Linking State (blank if not linked to any crew)
+  const [linkedSupervisor, setLinkedSupervisor] = useState<SupervisorCrewProfile | SavedSupervisorLink>(() => {
+    if (worker.supervisorCode) {
+      const resolved = findSupervisorByCode(worker.supervisorCode);
+      if (resolved) return resolved;
+    }
+    if (worker.supervisorEmail || worker.supervisorName) {
+      return {
+        code: worker.supervisorCode || '',
+        name: worker.supervisorName || '',
+        rut: worker.supervisorRut || '',
+        company: worker.company || '',
+        faena: worker.faena || '',
+        email: worker.supervisorEmail || '',
+        shiftName: 'Turno Actual',
+        lastUsedDate: new Date().toISOString().split('T')[0],
+        planStatus: 'free'
+      };
+    }
+    return {
+      code: '',
+      name: '',
+      rut: '',
+      company: '',
+      faena: '',
+      email: '',
+      shiftName: '',
+      lastUsedDate: '',
+      planStatus: 'free'
+    };
+  });
+
+  // Keep linked supervisor in sync when worker prop updates
+  useEffect(() => {
+    if (worker.supervisorEmail && worker.supervisorEmail !== linkedSupervisor.email) {
+      setLinkedSupervisor(prev => ({
+        ...prev,
+        name: worker.supervisorName || prev.name,
+        email: worker.supervisorEmail || prev.email,
+        rut: worker.supervisorRut || prev.rut,
+        code: worker.supervisorCode || prev.code,
+      }));
+    }
+  }, [worker.supervisorEmail, worker.supervisorName]);
+  const [showSupervisorModal, setShowSupervisorModal] = useState<boolean>(false);
+
+  // Step 2: FYS Pre-Turn Survey State - Defaulted to optimal condition or previous evaluation
+  const prevEvaluationDefaults = getPreviousEvaluationDefaults();
+  const [fysSurvey, setFysSurvey] = useState<FYSPreTurnSurvey>(() => {
+    if (prevEvaluationDefaults?.fysSurvey) {
+      return prevEvaluationDefaults.fysSurvey;
+    }
+    return {
+      energyToStartShift: true,
+      significantPhysicalFatigue: false,
+      painAffectingDriving: false,
+      medicationsOrDrugsConsumed: false,
+      alcoholConsumedLast12Hours: false,
+      nightQuestions: (worker.currentShift?.type === 'night' || evaluationShiftType === 'night') ? {
+        yawningOrHeavyEyelids: false,
+        hydratedAndNourished: true,
+        excessEnergyDrinks: false,
+        daytimeSleepEnvironment: 'optimal',
+        cabinLightingCondition: 'optimal',
+      } : undefined
+    };
   });
 
   // Keep night questions in sync when shift type changes
@@ -128,21 +254,22 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     }
   };
 
-  // Step 3: Sleep Form State
-  const [sleepHours, setSleepHours] = useState<number>(6.5);
-  const [sleepOpportunity, setSleepOpportunity] = useState<number>(10.0);
-  const [bedTime, setBedTime] = useState<string>('23:00');
-  const [wakeTime, setWakeTime] = useState<string>('05:30');
-  const [sleepQuality, setSleepQuality] = useState<1 | 2 | 3 | 4 | 5>(3);
+  // Step 3: Sleep Form State - Defaulted to optimal condition (8.0h, Excelente = 5) or previous evaluation values
+  const [sleepHours, setSleepHours] = useState<number>(prevEvaluationDefaults?.sleepHours ?? 8.0);
+  const [sleepOpportunity, setSleepOpportunity] = useState<number>(prevEvaluationDefaults?.sleepOpportunity ?? 8.5);
+  const [bedTime, setBedTime] = useState<string>(prevEvaluationDefaults?.bedTime ?? '23:00');
+  const [wakeTime, setWakeTime] = useState<string>(prevEvaluationDefaults?.wakeTime ?? '07:00');
+  const [sleepQuality, setSleepQuality] = useState<1 | 2 | 3 | 4 | 5>(prevEvaluationDefaults?.sleepQuality ?? 5);
   const [consecutiveNights, setConsecutiveNights] = useState<number>(
     worker.currentShift?.type === 'night' ? worker.currentShift.dayInRoster : 0
   );
 
-  // Step 4: KSS State (1 to 9)
-  const [kssScore, setKssScore] = useState<number>(3);
+  // Step 4: KSS State (1 to 9) - Defaulted to optimal alert condition (1) or previous evaluation
+  const [kssScore, setKssScore] = useState<number>(prevEvaluationDefaults?.kssScore ?? 1);
 
   // Step 5: PVT Result
   const [pvtSummary, setPvtSummary] = useState<PVTSummary | null>(null);
+  const [pvtDeviceContext, setPvtDeviceContext] = useState<PVTDeviceContext | undefined>(undefined);
 
   // Step 6: Worker Signature
   const [workerSignature, setWorkerSignature] = useState<string>('');
@@ -156,8 +283,58 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   // Step 8: Generated Evaluation & PDF Status & Supervisor Dispatch
   const [evaluationResult, setEvaluationResult] = useState<FRARiskEvaluation | null>(null);
   const [pdfGenerated, setPdfGenerated] = useState<boolean>(false);
+  const [isEvaluationFinalizedSaved, setIsEvaluationFinalizedSaved] = useState<boolean>(false);
   const [dispatchItem, setDispatchItem] = useState<PendingSupervisorDispatch | null>(null);
   const [isSyncingSupervisor, setIsSyncingSupervisor] = useState<boolean>(false);
+
+  // Sync state listener for real-time dispatch progress
+  useEffect(() => {
+    if (!evaluationResult) return;
+    const unsub = subscribeToQueue((queue) => {
+      const match = queue.find(q => q.evaluationId === evaluationResult.id);
+      if (match) {
+        setDispatchItem(match);
+      }
+    });
+    return () => unsub();
+  }, [evaluationResult]);
+
+  const [pdfDownloaded, setPdfDownloaded] = useState<boolean>(false);
+  const [emailDispatchedOnFinalize, setEmailDispatchedOnFinalize] = useState<boolean>(false);
+  const [showPassModal, setShowPassModal] = useState<boolean>(false);
+  const [isScrollLocked, setIsScrollLocked] = useState<boolean>(true);
+  const [lockCountdown, setLockCountdown] = useState<number>(2);
+
+  // 2-Second Temporary Scroll Lock on Step Navigation to ensure ad/header viewability (MRC Standard)
+  useEffect(() => {
+    // Scroll immediately to top
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    }
+
+    // Lock scroll for exactly 2 seconds
+    setIsScrollLocked(true);
+    setLockCountdown(2);
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const tickTimer = setInterval(() => {
+      setLockCountdown((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+
+    const unlockTimer = setTimeout(() => {
+      document.body.style.overflow = prevOverflow || '';
+      setIsScrollLocked(false);
+      setLockCountdown(0);
+    }, 2000);
+
+    return () => {
+      clearInterval(tickTimer);
+      clearTimeout(unlockTimer);
+      document.body.style.overflow = prevOverflow || '';
+    };
+  }, [currentStep]);
 
   const kssDescriptions = [
     { value: 1, label: 'Extremadamente alerta', desc: 'Máxima agudeza mental, sin fatiga.', color: 'border-emerald-500 text-emerald-400' },
@@ -174,16 +351,23 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   // Dynamic worker object for this evaluation
   const evaluatedWorker: WorkerProfile = {
     ...worker,
-    faena: customWeather?.faenaName || worker.faena,
+    shiftPattern: shiftPattern,
+    habitualShiftType: habitualShiftType,
+    faena: customWeather?.faenaName || linkedSupervisor.faena || worker.faena,
     altitudeMeters: customWeather?.altitudeMeters || worker.altitudeMeters,
     weather: customWeather || worker.weather,
+    supervisorName: worker.supervisorName || linkedSupervisor.name,
+    supervisorEmail: worker.supervisorEmail || linkedSupervisor.email,
+    supervisorCode: worker.supervisorCode || linkedSupervisor.code,
+    supervisorRut: worker.supervisorRut || linkedSupervisor.rut,
+    supervisorCompany: worker.company || linkedSupervisor.company,
     currentShift: {
       ...worker.currentShift,
       type: evaluationShiftType,
       dayInRoster: evaluationDayInRoster,
       shiftStart: evaluationShiftType === 'night' ? '19:00' : '07:00',
       shiftEnd: evaluationShiftType === 'night' ? '07:00' : '19:00',
-      rosterPattern: worker.shiftPattern || worker.currentShift?.rosterPattern || '7x7 Continuo'
+      rosterPattern: shiftPattern
     }
   };
 
@@ -200,7 +384,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
 
   // Compute provisional evaluation once PVT is completed
   const provisionalEval = pvtSummary
-    ? evaluateFRARisk(evaluatedWorker, currentSleepRecord, kssScore, pvtSummary, fysSurvey)
+    ? evaluateFRARisk(evaluatedWorker, currentSleepRecord, kssScore, pvtSummary, fysSurvey, undefined, false, undefined, pvtDeviceContext)
     : null;
 
   const activeStatus = evaluationResult?.status || provisionalEval?.status || 'green';
@@ -232,8 +416,11 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     }
   };
 
-  const handlePvtComplete = (summary: PVTSummary) => {
+  const handlePvtComplete = (summary: PVTSummary, deviceContext?: PVTDeviceContext) => {
     setPvtSummary(summary);
+    if (deviceContext) {
+      setPvtDeviceContext(deviceContext);
+    }
   };
 
   const handleWorkerSignatureSave = (signature: string) => {
@@ -266,42 +453,60 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     };
 
     // Calculate multidimensional FRA Engine result with FYS Survey and Signatures
-    const baseResult = evaluateFRARisk(evaluatedWorker, sleepRecord, kssScore, pvtSummary, fysSurvey);
+    const baseResult = evaluateFRARisk(evaluatedWorker, sleepRecord, kssScore, pvtSummary, fysSurvey, undefined, false, undefined, pvtDeviceContext);
     
+    // Check for clock drift tampering
+    const { timestampIso, isTrusted, note: clockNote } = await import('../../lib/clockSync').then(m => m.getTrustedTimestamp());
+
     // Worker signature is required, supervisor signature is optional
     const finalEvaluation: FRARiskEvaluation = {
       ...baseResult,
+      timestamp: timestampIso,
+      supervisorCode: linkedSupervisor.code,
+      supervisorRut: linkedSupervisor.rut,
+      supervisorName: linkedSupervisor.name,
       workerSignature: workerSignature || undefined,
-      workerSignatureTimestamp: workerSignatureTime || new Date().toISOString(),
+      workerSignatureTimestamp: workerSignatureTime || timestampIso,
       supervisorSignature: supervisorSignature || undefined,
-      supervisorSignatureTimestamp: supervisorSignatureTime || (supervisorSignature ? new Date().toISOString() : undefined),
-      supervisorNotes: supervisorNotes || 'Validado conforme por supervisión de turno.',
+      supervisorSignatureTimestamp: supervisorSignatureTime || (supervisorSignature ? timestampIso : undefined),
+      supervisorNotes: supervisorNotes 
+        ? (clockNote ? `${supervisorNotes} [${clockNote}]` : supervisorNotes)
+        : (clockNote ? `Validado conforme. [${clockNote}]` : 'Validado conforme por supervisión de turno.'),
     };
 
     setEvaluationResult(finalEvaluation);
     setCurrentStep(8);
 
-    // 1. Enqueue automatic supervisor transmission with offline persistence & auto-sync
+    // 1. Persist evaluation securely in Enterprise IndexedDB (unlimited quota)
     try {
-      const activeMeasures = (LEVEL_CONTROL_MEASURES[finalEvaluation.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
-      const enqueued = await enqueueSupervisorDispatch(
-        evaluatedWorker,
-        finalEvaluation,
+      const { dbStorage } = await import('../../lib/indexedDbStorage');
+      await dbStorage.saveEvaluation({
+        ...finalEvaluation,
+        worker: evaluatedWorker,
         sleepRecord,
         pvtSummary,
-        activeMeasures
-      );
-      setDispatchItem(enqueued);
-    } catch (err) {
-      console.warn('Supervisor dispatch enqueue note:', err);
+      });
+    } catch (dbErr) {
+      console.warn('IndexedDB evaluation save note:', dbErr);
     }
 
-    // 2. Auto-generate and prepare official PDF with guilloché security background and signatures
-    try {
-      await downloadEvaluationPDF(evaluatedWorker, finalEvaluation, sleepRecord, pvtSummary);
-      setPdfGenerated(true);
-    } catch (e) {
-      console.warn('PDF Auto-download note:', e);
+    // 2. Proactively enqueue and trigger supervisor email dispatch immediately upon evaluation generation (Paid Supervisor Feature)
+    if (isSupervisorPaid(linkedSupervisor)) {
+      try {
+        const activeMeasures = (LEVEL_CONTROL_MEASURES[finalEvaluation.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+        const enqueued = await enqueueSupervisorDispatch(
+          evaluatedWorker,
+          finalEvaluation,
+          sleepRecord,
+          pvtSummary,
+          activeMeasures
+        );
+        setDispatchItem(enqueued);
+      } catch (dispErr) {
+        console.warn('Immediate supervisor dispatch note:', dispErr);
+      }
+    } else {
+      setDispatchItem(null);
     }
   };
 
@@ -375,6 +580,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
       openSupervisorEmailClient(dispatchItem);
     } else if (evaluationResult) {
       const activeMeasures = (LEVEL_CONTROL_MEASURES[evaluationResult.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+      const isHighRisk = evaluationResult.status === 'red' || (evaluationResult.riskScore >= 60);
       const tempDispatch: PendingSupervisorDispatch = {
         id: `temp_${Date.now()}`,
         evaluationId: evaluationResult.id,
@@ -389,6 +595,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
         status: evaluationResult.status,
         statusLabel: evaluationResult.statusLabel,
         riskScore: evaluationResult.riskScore,
+        priority: isHighRisk ? 'high' : 'normal',
         hashSha256: evaluationResult.hashSha256,
         recommendedAction: evaluationResult.recommendedAction,
         measuresApplied: activeMeasures,
@@ -404,6 +611,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
       shareSupervisorWhatsApp(dispatchItem);
     } else if (evaluationResult) {
       const activeMeasures = (LEVEL_CONTROL_MEASURES[evaluationResult.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+      const isHighRisk = evaluationResult.status === 'red' || (evaluationResult.riskScore >= 60);
       const tempDispatch: PendingSupervisorDispatch = {
         id: `temp_${Date.now()}`,
         evaluationId: evaluationResult.id,
@@ -418,6 +626,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
         status: evaluationResult.status,
         statusLabel: evaluationResult.statusLabel,
         riskScore: evaluationResult.riskScore,
+        priority: isHighRisk ? 'high' : 'normal',
         hashSha256: evaluationResult.hashSha256,
         recommendedAction: evaluationResult.recommendedAction,
         measuresApplied: activeMeasures,
@@ -428,8 +637,64 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
     }
   };
 
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
     if (evaluationResult) {
+      const sleepRecord: SleepRecord = {
+        sleepDurationHours: sleepHours,
+        sleepOpportunityHours: sleepOpportunity,
+        bedTime,
+        wakeTime,
+        sleepQuality,
+        timeSinceAwakeHours: 1.5,
+        accumulatedSleepDebtHours: Math.max(0, 8 - sleepHours),
+        consecutiveNights,
+      };
+
+      // 1. Enqueue automatic supervisor transmission with offline persistence & auto-sync
+      try {
+        const activeMeasures = (LEVEL_CONTROL_MEASURES[evaluationResult.status] || LEVEL_CONTROL_MEASURES.green).measures.map(m => m.title);
+        const enqueued = await enqueueSupervisorDispatch(
+          evaluatedWorker,
+          evaluationResult,
+          sleepRecord,
+          pvtSummary,
+          activeMeasures
+        );
+        setDispatchItem(enqueued);
+      } catch (err) {
+        console.warn('Supervisor dispatch on finalize note:', err);
+      }
+
+      // 2. Generate and download official PDF
+      try {
+        await downloadEvaluationPDF(evaluatedWorker, evaluationResult, sleepRecord, pvtSummary);
+        setPdfGenerated(true);
+      } catch (e) {
+        console.warn('PDF download on finalize note:', e);
+      }
+
+      setIsEvaluationFinalizedSaved(true);
+
+      // Save current evaluation inputs for subsequent check-ins
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('fys_last_evaluation_inputs', JSON.stringify({
+            sleepHours,
+            sleepOpportunity,
+            bedTime,
+            wakeTime,
+            sleepQuality,
+            kssScore,
+            shiftPattern,
+            evaluationShiftType,
+            evaluationDayInRoster,
+            fysSurvey,
+          }));
+        }
+      } catch (e) {
+        console.warn('Error persisting evaluation defaults:', e);
+      }
+
       onCheckInComplete(evaluationResult);
     }
   };
@@ -437,23 +702,47 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   const resetFlow = () => {
     setCurrentStep(1);
     setPvtSummary(null);
+    setPvtDeviceContext(undefined);
     setWorkerSignature('');
     setWorkerSignatureTime('');
     setSupervisorSignature('');
     setSupervisorSignatureTime('');
     setEvaluationResult(null);
     setPdfGenerated(false);
+    setIsEvaluationFinalizedSaved(false);
     setDispatchItem(null);
+    const prev = getPreviousEvaluationDefaults();
+    setSleepHours(prev?.sleepHours ?? 8.0);
+    setSleepOpportunity(prev?.sleepOpportunity ?? 8.5);
+    setBedTime(prev?.bedTime ?? '23:00');
+    setWakeTime(prev?.wakeTime ?? '07:00');
+    setSleepQuality(prev?.sleepQuality ?? 5);
+    setKssScore(prev?.kssScore ?? 1);
+    setConsecutiveNights(0);
+    setEvaluationDayInRoster(1);
+    setFysSurvey(prev?.fysSurvey ?? {
+      energyToStartShift: true,
+      significantPhysicalFatigue: false,
+      painAffectingDriving: false,
+      medicationsOrDrugsConsumed: false,
+      alcoholConsumedLast12Hours: false,
+      nightQuestions: undefined
+    });
   };
 
 
   return (
     <div className="max-w-2xl mx-auto space-y-4">
+      {/* Dynamic Top Advertising / Operational Banner in All 8 Steps */}
+      <div className="w-full">
+        <AdBanner userRole="worker" />
+      </div>
+
       {/* Progress Steps Header */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
         <div className="flex items-center justify-between text-xs font-semibold mb-3">
           <span className="text-slate-500">Paso {currentStep} de 8</span>
-          <span className="text-amber-600 font-bold">
+          <span className="text-blue-700 font-bold">
             {currentStep === 1 && '1. Identificación y Contexto de Faena'}
             {currentStep === 2 && '2. Test FYS Pre-Turno & Clima'}
             {currentStep === 3 && '3. Caracterización del Sueño'}
@@ -469,7 +758,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             <div
               key={step}
               className={`h-full transition-all duration-300 rounded-full ${
-                step <= currentStep ? 'bg-amber-500' : 'bg-transparent'
+                step <= currentStep ? 'bg-blue-600' : 'bg-transparent'
               }`}
             />
           ))}
@@ -505,17 +794,17 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
 
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
               <span className="text-slate-500 block font-medium">Equipo Asignado & Tarea</span>
-              <p className="font-bold text-sm text-amber-700">{worker.equipmentAssigned}</p>
+              <p className="font-bold text-sm text-blue-700">{worker.equipmentAssigned}</p>
               <p className="text-slate-600">{worker.role}</p>
             </div>
 
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1 relative group">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500 block font-medium">Faena & Meteorología</span>
+                <span className="text-slate-500 block font-medium">Faena o Lugar de trabajo & Meteorología</span>
                 <button
                   type="button"
                   onClick={() => setShowWeatherModal(true)}
-                  className="text-[10px] text-amber-700 hover:text-amber-900 font-bold flex items-center gap-1 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200 cursor-pointer transition-colors"
+                  className="text-[10px] text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md border border-blue-200 cursor-pointer transition-colors"
                 >
                   <Edit2 className="w-2.5 h-2.5" />
                   <span>Ajustar</span>
@@ -526,7 +815,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
               </p>
               <div className="flex items-center justify-between text-slate-600 text-[11px] font-medium pt-0.5">
                 <span className="flex items-center gap-1 font-mono">
-                  <Mountain className="w-3.5 h-3.5 text-amber-600" />
+                  <Mountain className="w-3.5 h-3.5 text-blue-600" />
                   <span>{evaluatedWorker.altitudeMeters} msnm</span>
                 </span>
                 <span className="flex items-center gap-1 font-mono text-slate-700">
@@ -539,28 +828,174 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
               </div>
             </div>
 
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-1">
-              <span className="text-slate-500 block font-medium">Sistema de Turno Base</span>
-              <p className="font-bold text-sm text-slate-900">
-                {worker.shiftPattern || worker.currentShift?.rosterPattern || '7x7 Continuo'}
-              </p>
-              <p className="text-slate-500 text-[11px]">
-                Jornada habitual: <strong>{worker.habitualShiftType === 'night' ? 'Nocturna' : worker.habitualShiftType === 'rotative' ? 'Rotativa' : 'Diurna'}</strong>
-              </p>
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-700 font-bold block text-xs flex items-center gap-1">
+                  <Sliders className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Sistema de Turno & Jornada Habitual</span>
+                </span>
+                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                  <Check className="w-2.5 h-2.5" /> Auto-sync
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-600 block">
+                    Sistema de Turno:
+                  </label>
+                  <select
+                    id="step1-shift-pattern-select"
+                    value={['7x7', '4x3', '5x2', '4x4', '6x1', '10x10', '8x6', '10x5', '14x14'].includes(shiftPattern) ? shiftPattern : 'Turno Especial'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'Turno Especial') {
+                        handleShiftPatternChange(`${customWorkDays}x${customRestDays}`);
+                      } else {
+                        handleShiftPatternChange(val);
+                      }
+                    }}
+                    className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-bold text-xs cursor-pointer shadow-2xs"
+                  >
+                    <option value="7x7">7x7 (7 trab x 7 desc)</option>
+                    <option value="4x3">4x3 (4 trab x 3 desc)</option>
+                    <option value="5x2">5x2 (5 trab x 2 desc)</option>
+                    <option value="4x4">4x4 (4 trab x 4 desc)</option>
+                    <option value="6x1">6x1 (6 trab x 1 desc)</option>
+                    <option value="10x10">10x10 (10 trab x 10 desc)</option>
+                    <option value="8x6">8x6 (8 trab x 6 desc)</option>
+                    <option value="10x5">10x5 (10 trab x 5 desc)</option>
+                    <option value="14x14">14x14 (14 trab x 14 desc)</option>
+                    <option value="Turno Especial">➕ Personalizado...</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-600 block">
+                    Jornada Habitual:
+                  </label>
+                  <select
+                    id="step1-habitual-shift-select"
+                    value={habitualShiftType}
+                    onChange={(e) => handleHabitualShiftTypeChange(e.target.value as 'day' | 'night' | 'rotative')}
+                    className="w-full px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:border-blue-500 focus:outline-none text-slate-900 font-bold text-xs cursor-pointer shadow-2xs"
+                  >
+                    <option value="day">☀️ Diurna (Turno Día)</option>
+                    <option value="night">🌙 Nocturna (Turno Noche)</option>
+                    <option value="rotative">🔄 Rotativa / Mixta</option>
+                  </select>
+                </div>
+              </div>
+
+              {!['7x7', '4x3', '5x2', '4x4', '6x1', '10x10', '8x6', '10x5', '14x14'].includes(shiftPattern) && (
+                <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg space-y-1 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-slate-600 block">Días Trabajo:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="30"
+                        value={customWorkDays}
+                        onChange={(e) => {
+                          const w = Math.max(1, parseInt(e.target.value) || 1);
+                          setCustomWorkDays(w);
+                          handleShiftPatternChange(`${w}x${customRestDays}`);
+                        }}
+                        className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-center text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-slate-600 block">Días Descanso:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="30"
+                        value={customRestDays}
+                        onChange={(e) => {
+                          const r = Math.max(1, parseInt(e.target.value) || 1);
+                          setCustomRestDays(r);
+                          handleShiftPatternChange(`${customWorkDays}x${r}`);
+                        }}
+                        className="w-full px-2 py-1 bg-white border border-slate-300 rounded font-bold text-center text-xs"
+                      />
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-blue-800 font-mono block">
+                    Jornada configurada: <strong>{shiftPattern}</strong> ({customWorkDays} trab. x {customRestDays} desc.)
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
+          {/* Supervisor de Turno / Cuadrilla Vinculada Card */}
+          <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 text-white space-y-3 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-400/30 flex items-center gap-1">
+                  <Users className="w-3 h-3 text-blue-400" />
+                  Supervisor & Cuadrilla Asignada
+                </span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono font-bold border border-emerald-500/30">
+                  Plan Pro
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSupervisorModal(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all self-start sm:self-auto cursor-pointer shadow-xs"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Cambiar / Vincular Supervisor</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 text-[10px] block">Código de Cuadrilla:</span>
+                <span className="font-mono text-base font-extrabold text-blue-400 tracking-wider block mt-0.5">
+                  {linkedSupervisor.code}
+                </span>
+              </div>
+
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 text-[10px] block">Supervisor Titular:</span>
+                <span className="font-bold text-slate-100 text-xs block mt-0.5 truncate">
+                  {linkedSupervisor.name}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  RUT: {linkedSupervisor.rut}
+                </span>
+              </div>
+
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 text-[10px] block">Turno y Empresa:</span>
+                <span className="font-semibold text-slate-200 text-xs block mt-0.5 truncate">
+                  {linkedSupervisor.shiftName || 'Turno Día A'}
+                </span>
+                <span className="text-[10px] text-slate-400 truncate block">
+                  {linkedSupervisor.company}
+                </span>
+              </div>
+            </div>
+            
+            <p className="text-[11px] text-slate-300 italic">
+              * Tus resultados y alertas tempranas de fatiga se reportarán automáticamente en la consola de este supervisor.
+            </p>
+          </div>
+
           {/* Shift Selectors */}
-          <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200/80 space-y-4">
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-                <Clock className="w-4 h-4 text-amber-600" />
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-xs">
+                <Clock className="w-4 h-4 text-blue-600" />
                 <span>Configuración del Turno para esta Evaluación</span>
               </div>
               <button
                 type="button"
                 onClick={() => setIsShiftSwitch(!isShiftSwitch)}
-                className="text-[11px] text-amber-700 hover:text-amber-900 underline font-medium cursor-pointer"
+                className="text-[11px] text-blue-600 hover:text-blue-800 underline font-medium cursor-pointer"
               >
                 {isShiftSwitch ? 'Ocultar ajustes' : '¿Cambiaste de turno o día?'}
               </button>
@@ -577,11 +1012,11 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
                     onClick={() => handleShiftTypeChange('day')}
                     className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                       evaluationShiftType === 'day'
-                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs font-bold'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-bold'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    <Sun className="w-3.5 h-3.5 text-amber-600" />
+                    <Sun className="w-3.5 h-3.5 text-amber-500" />
                     <span>Turno Día</span>
                   </button>
                   <button
@@ -600,25 +1035,47 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Día dentro del Ciclo:
-                </label>
-                <div className="flex items-center gap-1">
-                  {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Día dentro del Ciclo:
+                  </label>
+                  <span className="text-[11px] font-bold text-blue-700 font-mono">
+                    Día {evaluationDayInRoster >= 21 ? '21+' : evaluationDayInRoster}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+                  {Array.from({ length: 20 }, (_, i) => i + 1).map((d) => (
                     <button
                       key={d}
                       type="button"
                       onClick={() => handleDayInRosterChange(d)}
-                      className={`flex-1 py-2 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer ${
+                      className={`min-w-[28px] py-1.5 px-1 rounded-md text-[10px] font-mono font-bold border transition-all cursor-pointer flex-shrink-0 ${
                         evaluationDayInRoster === d
-                          ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
                       D{d}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => handleDayInRosterChange(21)}
+                    className={`min-w-[36px] py-1.5 px-1.5 rounded-md text-[10px] font-mono font-bold border transition-all cursor-pointer flex-shrink-0 ${
+                      evaluationDayInRoster >= 21
+                        ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                        : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                    }`}
+                    title="21 días continuos o más"
+                  >
+                    D21+
+                  </button>
                 </div>
+                {evaluationDayInRoster > 7 && (
+                  <p className="text-[10px] text-amber-700 font-medium mt-1">
+                    ⚠️ Turno extendido (Día {evaluationDayInRoster}): Se pondera factor de fatiga acumulada por jornada prolongada.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -674,18 +1131,18 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             <input
               id="sleep-hours-slider"
               type="range"
-              min="2.0"
-              max="11.0"
+              min="0.0"
+              max="12.0"
               step="0.5"
               value={sleepHours}
               onChange={(e) => setSleepHours(parseFloat(e.target.value))}
               className="w-full h-2.5 bg-indigo-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
             />
             <div className="flex justify-between text-[11px] text-slate-500 font-mono">
-              <span>2.0h (Crítico)</span>
-              <span>6.0h (Mínimo)</span>
+              <span>0.0h</span>
+              <span>4.0h</span>
               <span>7.5h (Óptimo)</span>
-              <span>11.0h</span>
+              <span>12.0h</span>
             </div>
           </div>
 
@@ -924,10 +1381,10 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
           </div>
 
           {/* Mandatory Worker Commitment Statement Box */}
-          <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-xl text-amber-950 space-y-1.5 shadow-xs">
+          <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-xl text-blue-950 space-y-1.5 shadow-xs">
             <div className="flex items-center gap-2">
-              <ClipboardCheck className="w-5 h-5 text-amber-700 flex-shrink-0" />
-              <span className="text-xs font-bold uppercase tracking-wider text-amber-900">
+              <ClipboardCheck className="w-5 h-5 text-blue-700 flex-shrink-0" />
+              <span className="text-xs font-bold uppercase tracking-wider text-blue-900">
                 Declaración de Compromiso Operacional:
               </span>
             </div>
@@ -940,7 +1397,7 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-900 flex items-center gap-1.5">
-                <PenTool className="w-4 h-4 text-amber-600" />
+                <PenTool className="w-4 h-4 text-blue-600" />
                 <span>Firma Manuscrita del Trabajador (Obligatoria)</span>
               </span>
               {workerSignature ? (
@@ -972,8 +1429,8 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
           </div>
 
           {!workerSignature && (
-            <p className="text-xs text-center text-amber-800 font-medium bg-amber-50 p-2 rounded-lg border border-amber-200">
-              ⚠️ Debes estampar tu firma en el recuadro superior para confirmar tu compromiso y continuar.
+            <p className="text-xs text-center text-blue-800 font-medium bg-blue-50 p-2 rounded-lg border border-blue-200">
+              ℹ️ Debes estampar tu firma en el recuadro superior para confirmar tu compromiso y continuar.
             </p>
           )}
 
@@ -1195,31 +1652,54 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             />
           </div>
 
-          {/* 5. Optional Supervisor Handwritten Signature Canvas */}
+          {/* 5. Supervisor Handwritten Signature Canvas / Paid Notice */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-800 flex items-center gap-1">
-                <span>Firma Manuscrita del Supervisor</span>
-                <span className="text-[11px] text-slate-500 font-normal">(Opcional en Terreno)</span>
+                <span>Firma del Supervisor HSEC</span>
               </span>
-              {supervisorSignature ? (
-                <span className="text-emerald-600 font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Firma Estampada</span>
-                </span>
+              {isSupervisorPaid(linkedSupervisor) ? (
+                supervisorSignature ? (
+                  <span className="text-emerald-600 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Firma Estampada</span>
+                  </span>
+                ) : (
+                  <span className="text-slate-500 text-[11px]">Validación manuscrita opcional</span>
+                )
               ) : (
-                <span className="text-slate-500 text-[11px]">Validación digital por defecto</span>
+                <span className="text-[10px] text-amber-700 bg-amber-100 font-bold px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" />
+                  Función de Pago
+                </span>
               )}
             </div>
 
-            <SignaturePad
-              id="supervisor-signature-canvas"
-              title="Recuadro de Firma del Supervisor HSEC"
-              subtitle="Firma manuscrita en pantalla (opcional). Puedes emitir el informe directamente sin firma gráfica."
-              signeeName={worker.supervisorName || 'Carlos Henríquez'}
-              signeeRole="Supervisor de Turno / Seguridad HSEC"
-              onSaveSignature={handleSupervisorSignatureSave}
-            />
+            {isSupervisorPaid(linkedSupervisor) ? (
+              <SignaturePad
+                id="supervisor-signature-canvas"
+                title="Recuadro de Firma del Supervisor HSEC"
+                subtitle="Firma manuscrita en pantalla (opcional). Puedes emitir el informe directamente sin firma gráfica."
+                signeeName={linkedSupervisor.name}
+                signeeRole={`Supervisor de Turno (${linkedSupervisor.code || 'Faena'} • ${linkedSupervisor.company || 'Empresa'})`}
+                signeeRut={linkedSupervisor.rut}
+                onSaveSignature={handleSupervisorSignatureSave}
+              />
+            ) : (
+              <div className="p-6 rounded-2xl bg-slate-100/60 opacity-60 border-2 border-dashed border-slate-300 text-center flex flex-col items-center justify-center space-y-2 select-none shadow-inner">
+                <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 shadow-2xs">
+                  <Lock className="w-5 h-5 text-slate-600" />
+                </div>
+                <div className="space-y-1.5 max-w-lg mx-auto">
+                  <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                    Solo disponible para la versión premium del supervisor
+                  </p>
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                    Con la versión premium del supervisor, el supervisor recibirá automáticamente a su correo electrónico una copia de cada una de las evaluaciones de sus trabajadores a cargo. Además, el supervisor podrá firmar en la pantalla del móvil cada una de las evaluaciones, estampando su firma manuscrita en el reporte PDF de Fatiga y Somnolencia de cada trabajador, con el nombre de la faena y empresa asignada.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-2">
@@ -1309,140 +1789,151 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             </div>
           </div>
 
-          {/* Multi-Platform PDF Action Hub */}
-          <div className="bg-slate-900 text-white p-4 rounded-xl space-y-3">
-            <div className="flex items-start justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
-                  <FileDown className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="font-bold text-sm text-white block">
-                    Certificado PDF Oficial Oplira (Fondo Guilloché + Trazabilidad SHA-256)
-                  </span>
-                  <span className="text-[11px] text-slate-300">
-                    {pdfGenerated ? 'Generado y listo para descargar o compartir en el teléfono' : 'Documento oficial con validez legal HSEC'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-              <button
-                id="download-evaluation-pdf-btn"
-                type="button"
-                onClick={handleManualDownloadPDF}
-                className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-all flex items-center justify-center gap-2 text-xs shadow-xs cursor-pointer active:scale-98"
-                title="Descargar o guardar el archivo PDF en el almacenamiento del dispositivo"
-              >
-                <FileDown className="w-4 h-4" />
-                <span>Descargar PDF</span>
-              </button>
-
-              <button
-                id="share-evaluation-pdf-btn"
-                type="button"
-                onClick={handleNativeSharePDF}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer active:scale-98"
-                title="Compartir directo por WhatsApp, Google Drive o correo en el teléfono"
-              >
-                <Share2 className="w-4 h-4 text-emerald-400" />
-                <span>Compartir / Enviar</span>
-              </button>
-
-              <button
-                id="preview-evaluation-pdf-btn"
-                type="button"
-                onClick={handlePreviewPDF}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer active:scale-98"
-                title="Abrir vista previa del PDF en pantalla"
-              >
-                <ExternalLink className="w-4 h-4 text-sky-400" />
-                <span>Ver en Pantalla</span>
-              </button>
-            </div>
-          </div>
-
           {/* Supervisor Email & Automatic Offline Sync Queue Status */}
-          <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
-            dispatchItem?.syncStatus === 'synced'
-              ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
-              : 'bg-amber-50/90 border-amber-300 text-amber-950'
-          }`}>
-            <div className="flex items-start gap-3">
-              <div className={`p-2 rounded-lg ${
-                dispatchItem?.syncStatus === 'synced' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-              }`}>
-                {dispatchItem?.syncStatus === 'synced' ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-              </div>
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold block text-xs">
-                    {dispatchItem?.syncStatus === 'synced'
-                      ? '✓ Copia Certificada Despachada al Supervisor Directo'
-                      : '⏳ En Cola de Despacho Automático Offline'}
-                  </span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                    dispatchItem?.syncStatus === 'synced'
-                      ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
-                      : 'bg-amber-100 border-amber-300 text-amber-800'
-                  }`}>
-                    {dispatchItem?.syncStatus === 'synced' ? 'Enviado' : 'Pendiente Auto-Sync'}
-                  </span>
-                </div>
-                <p className="text-[11px] opacity-90 leading-relaxed">
+          {isSupervisorPaid(linkedSupervisor) && (
+            <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
+              dispatchItem?.syncStatus === 'synced'
+                ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
+                : dispatchItem?.syncStatus === 'failed'
+                ? 'bg-rose-50/90 border-rose-300 text-rose-950'
+                : 'bg-amber-50/90 border-amber-300 text-amber-950'
+            }`}>
+              <div className="flex items-start gap-3 w-full">
+                <div className={`p-2 rounded-lg flex-shrink-0 ${
+                  dispatchItem?.syncStatus === 'synced' 
+                    ? 'bg-emerald-100 text-emerald-700' 
+                    : dispatchItem?.syncStatus === 'failed'
+                    ? 'bg-rose-100 text-rose-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
                   {dispatchItem?.syncStatus === 'synced' ? (
-                    <>
-                      Se transmitió digitalmente a <strong>{evaluatedWorker.supervisorName || 'Supervisor de Faena'}</strong> (
-                      <span className="font-mono">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span>) con acuse de recepción y firma HSEC.
-                    </>
+                    <Check className="w-4 h-4" />
+                  ) : dispatchItem?.syncStatus === 'failed' ? (
+                    <AlertTriangle className="w-4 h-4" />
                   ) : (
-                    <>
-                      El dispositivo se encuentra en zona sin cobertura o en espera de red. El PDF y reporte se <strong>enviarán automáticamente</strong> a <span className="font-mono">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span> en cuanto haya internet, sin necesidad de reabrir la app.
-                    </>
+                    <Send className="w-4 h-4 animate-pulse" />
                   )}
-                </p>
-                <div className="flex flex-wrap items-center gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleDirectSupervisorEmail}
-                    className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-800 font-bold rounded-lg border border-slate-300 transition-all flex items-center gap-1.5 text-[11px] cursor-pointer shadow-2xs"
-                    title="Abrir en Gmail o app de correo para enviar al supervisor"
-                  >
-                    <Mail className="w-3.5 h-3.5 text-sky-600" />
-                    <span>Abrir en Correo (Gmail)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleDirectSupervisorWhatsApp}
-                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all flex items-center gap-1.5 text-[11px] cursor-pointer shadow-2xs"
-                    title="Enviar resumen inmediato al supervisor por WhatsApp"
-                  >
-                    <Share2 className="w-3.5 h-3.5 text-white" />
-                    <span>Enviar por WhatsApp</span>
-                  </button>
-
+                </div>
+                <div className="space-y-1 flex-1">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="font-bold block text-xs">
+                      {dispatchItem?.syncStatus === 'synced'
+                        ? '✓ Copia Despachada al Supervisor Directo'
+                        : dispatchItem?.syncStatus === 'syncing'
+                        ? '⚡ Transmitiendo Evaluación al Supervisor...'
+                        : dispatchItem?.syncStatus === 'failed'
+                        ? '⚠️ Despacho Automático Pendiente de Red Móvil'
+                        : '⏳ En Cola de Despacho Automático Offline'}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      dispatchItem?.syncStatus === 'synced'
+                        ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                        : dispatchItem?.syncStatus === 'failed'
+                        ? 'bg-rose-100 border-rose-300 text-rose-800'
+                        : 'bg-amber-100 border-amber-300 text-amber-800'
+                    }`}>
+                      {dispatchItem?.syncStatus === 'synced' 
+                        ? 'Enviado' 
+                        : dispatchItem?.syncStatus === 'syncing' 
+                        ? 'Enviando...' 
+                        : dispatchItem?.syncStatus === 'failed' 
+                        ? `Reintentando (${dispatchItem.retryCount})` 
+                        : 'Pendiente Auto-Sync'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] opacity-90 leading-relaxed">
+                    {dispatchItem?.syncStatus === 'synced' ? (
+                      <>
+                        Se transmitió digitalmente con éxito a <strong>{evaluatedWorker.supervisorName || 'Supervisor de Faena'}</strong> (
+                        <span className="font-mono">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span>) con acuse de recepción y hash SHA-256.
+                      </>
+                    ) : dispatchItem?.syncStatus === 'failed' ? (
+                      <>
+                        La red móvil presenta intermitencia ({dispatchItem.lastError || 'esperando señal'}). El sistema <strong>reintentará automáticamente</strong> en segundo plano al recuperar señal.
+                      </>
+                    ) : (
+                      <>
+                        El certificado y reporte se <strong>enviarán automáticamente</strong> a <span className="font-mono">{evaluatedWorker.supervisorEmail || 'supervisor.faena@minera.cl'}</span>. La cola inteligente mantiene reintentos activos en segundo plano.
+                      </>
+                    )}
+                  </p>
                   {dispatchItem?.syncStatus !== 'synced' && (
-                    <button
-                      type="button"
-                      onClick={handleManualSupervisorSync}
-                      disabled={isSyncingSupervisor}
-                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-                      title="Forzar intento de despacho manual"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupervisor ? 'animate-spin' : ''}`} />
-                      <span>{isSyncingSupervisor ? 'Despachando...' : 'Reintentar Auto-Sync'}</span>
-                    </button>
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={handleManualSupervisorSync}
+                        disabled={isSyncingSupervisor}
+                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold rounded-lg text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                        title="Forzar reintento de despacho inmediato"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupervisor ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingSupervisor ? 'Despachando...' : 'Reintentar Auto-Sync'}</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Action buttons (Visible after finalizing and saving evaluation) */}
+          {isEvaluationFinalizedSaved && (
+            <div className={`p-4 rounded-2xl shadow-xs space-y-3 transition-all ${
+              isSupervisorPaid(linkedSupervisor)
+                ? 'bg-gradient-to-r from-slate-900 to-slate-800 text-white'
+                : 'bg-slate-900/90 text-white border border-slate-700'
+            }`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <FileCheck2 className="w-5 h-5 text-sky-400" />
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-100">
+                      Reporte de Evaluación en PDF (SHA-256)
+                    </h4>
+                    <span className="text-[10px] text-slate-400">
+                      Formato de 2 páginas con Guilloché de Seguridad y Hash SHA-256
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-sky-300">
+                  {isSupervisorPaid(linkedSupervisor) 
+                    ? 'Plan Pro / Ilimitado' 
+                    : getPdfEvaluationCount() <= 30
+                    ? `Evaluación #${getPdfEvaluationCount()} de 30 gratuitas`
+                    : 'Versión Gratuita'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleManualDownloadPDF}
+                  className="py-2.5 px-3 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                >
+                  <FileDown className="w-4 h-4 text-slate-950" />
+                  <span>Descargar PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleNativeSharePDF}
+                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Share2 className="w-4 h-4 text-emerald-400" />
+                  <span>Compartir PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePreviewPDF}
+                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4 text-sky-300" />
+                  <span>Ver Documento</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Signature Verification Badges */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1460,7 +1951,12 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
               <div>
                 <span className="text-[10px] text-slate-500 block">Validación Supervisor</span>
-                <span className="font-bold text-slate-900">{worker.supervisorName || 'Supervisor HSEC'}</span>
+                <span className="font-bold text-slate-900">
+                  {evaluationResult.supervisorName || linkedSupervisor.name || 'Sin Supervisor Vinculado'} {linkedSupervisor.code ? `(${linkedSupervisor.code})` : ''}
+                </span>
+                <span className="text-[10px] text-slate-500 block font-mono">
+                  {evaluationResult.supervisorRut || linkedSupervisor.rut ? `RUT: ${evaluationResult.supervisorRut || linkedSupervisor.rut}` : 'No vinculado a cuadrilla'}
+                </span>
               </div>
               <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                 <CheckCircle className="w-3.5 h-3.5" />
@@ -1468,6 +1964,118 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
               </span>
             </div>
           </div>
+
+          {/* 1. Tri-Layer Assessment Architecture: Measurement Quality, Risk Drivers, and Operational Decision */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            {/* Layer 1: Data Quality */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Calidad de Medición</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                  evaluationResult.pvtValidity === 'valid'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : evaluationResult.pvtValidity === 'questionable'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {evaluationResult.pvtValidity === 'valid' ? '✓ Válida' : evaluationResult.pvtValidity === 'questionable' ? '⚠️ Dudosa' : '✕ No Concluyente'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                Confiabilidad técnica: <strong>{evaluationResult.dataQualityScore ?? evaluationResult.confidenceScore}%</strong>. Separada del nivel de fatiga.
+              </p>
+              {evaluationResult.deviceContext && (
+                <span className="text-[10px] text-slate-500 block font-mono">
+                  Muestreo: {evaluationResult.deviceContext.screenRefreshRateHz || 60}Hz • Latencia: ~{evaluationResult.deviceContext.deviceLatencyCalibratedMs || 10}ms
+                </span>
+              )}
+            </div>
+
+            {/* Layer 2: Risk Score */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Riesgo Fisiológico</span>
+                </span>
+                <span className="text-sm font-black text-slate-900">
+                  {evaluationResult.riskScore} <span className="text-[10px] text-slate-500 font-normal">/ 100</span>
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                Puntaje continuo multivariable: Sueño, KSS, PVT y Circadiano.
+              </p>
+              <span className="text-[10px] text-slate-500 block font-mono">
+                Algoritmo: v{evaluationResult.fraAlgorithmVersion || '3.0.0-frms'}
+              </span>
+            </div>
+
+            {/* Layer 3: Operational Decision */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Decisión Operacional</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                  evaluationResult.status === 'green'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : evaluationResult.status === 'yellow'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {evaluationResult.operationalDecision?.recommendation === 'normal_operation'
+                    ? 'Operación Normal'
+                    : evaluationResult.operationalDecision?.recommendation === 'controlled_operation'
+                    ? 'Operación Condicionada'
+                    : 'Intervención / Relevo'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                Acción HSEC vinculante para supervisor y operador en faena.
+              </p>
+            </div>
+          </div>
+
+          {/* Detailed Risk Drivers Breakdown */}
+          {evaluationResult.riskDrivers && evaluationResult.riskDrivers.length > 0 && (
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2.5">
+              <h4 className="text-xs font-bold text-slate-900 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Desglose Cuantitativo de Drivers de Riesgo</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  Impacto en Puntuación FRA
+                </span>
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {evaluationResult.riskDrivers.map((driver, idx) => (
+                  <div key={idx} className="p-2.5 bg-white rounded-lg border border-slate-200 flex items-start justify-between gap-2 shadow-2xs">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${driver.isProtective ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <span className="font-bold text-slate-900 text-xs">{driver.name}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight">{driver.description}</p>
+                    </div>
+                    <span className={`px-1.5 py-0.5 rounded font-mono font-bold text-xs flex-shrink-0 ${
+                      driver.isProtective 
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                        : driver.scoreImpact > 20 
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}>
+                      {driver.scoreImpact > 0 ? `+${driver.scoreImpact}` : `${driver.scoreImpact}`} pts
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Primary Explainability Factors ("¿Por qué?") */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2.5">
@@ -1490,16 +2098,70 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             </ul>
           </div>
 
+          {/* Structured Operational Decision Controls */}
+          {evaluationResult.operationalDecision && (
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs">
+              <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Controles Operacionales Exigidos (HSEC)</span>
+              </span>
+              
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-slate-700 block uppercase tracking-wider">
+                  Medidas Mandatorias:
+                </span>
+                <ul className="space-y-1 text-slate-700 pl-2">
+                  {evaluationResult.operationalDecision.mandatoryControls.map((ctrl, cIdx) => (
+                    <li key={cIdx} className="flex items-start gap-2">
+                      <span className="text-emerald-600 font-bold">✓</span>
+                      <span>{ctrl}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {evaluationResult.operationalDecision.suggestedControls && evaluationResult.operationalDecision.suggestedControls.length > 0 && (
+                <div className="space-y-1.5 pt-1 border-t border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-700 block uppercase tracking-wider">
+                    Medidas Complementarias / Sugeridas:
+                  </span>
+                  <ul className="space-y-1 text-slate-600 pl-2 text-[11px]">
+                    {evaluationResult.operationalDecision.suggestedControls.map((sug, sIdx) => (
+                      <li key={sIdx} className="flex items-start gap-2">
+                        <span className="text-slate-400 font-bold">•</span>
+                        <span>{sug}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Action guidance box */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1">
             <span className="font-bold text-slate-900 block">Instrucción Operacional Inmediata:</span>
             <p className="text-slate-600 leading-relaxed">{evaluationResult.actionDetails}</p>
           </div>
 
-          {/* Cryptographic Audit Hash */}
-          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
-            <span className="truncate">Hash: {evaluationResult.hashSha256}</span>
-            <span className="flex-shrink-0 text-emerald-600 ml-2 font-semibold">✓ Trazabilidad SHA-256</span>
+          {/* Legal Compliance & Cryptographic Audit Hash */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 text-[11px] text-slate-600">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1">
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Régimen Legal: Firma Electrónica Simple (FES, Ley 19.799) • Protección de Datos (Ley 21.719)</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                Art. 184 Código del Trabajo
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-tight">
+              La firma manuscrita y la emisión temporal quedan selladas con la huella digital SHA-256 para validez e integridad probatoria.
+            </p>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5 border-t border-slate-200">
+              <span className="truncate">Hash: {evaluationResult.hashSha256}</span>
+              <span className="flex-shrink-0 text-emerald-600 ml-2 font-semibold">✓ Trazabilidad Criptográfica SHA-256</span>
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -1511,19 +2173,6 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
             >
               <CheckCircle className="w-4 h-4" />
               <span>Finalizar y Guardar Evaluación</span>
-            </button>
-            <button
-              id="repeat-pvt-from-results-btn"
-              onClick={() => {
-                setCurrentStep(5);
-                setPvtSummary(null);
-                setEvaluationResult(null);
-                setPdfGenerated(false);
-              }}
-              className="px-4 py-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-              <span>Repetir Solo Test PVT</span>
             </button>
             <button
               onClick={resetFlow}
@@ -1539,12 +2188,33 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
       {/* Weather & Altitude Manual Calibration Modal */}
       <WeatherManualEditModal
         isOpen={showWeatherModal}
-        currentWeather={evaluatedWorker.weather || worker.weather}
+        currentWeather={evaluatedWorker?.weather || worker?.weather || DEFAULT_SAMPLE_WEATHER}
         onClose={() => setShowWeatherModal(false)}
         onSave={(updated) => {
           setCustomWeather(updated);
         }}
       />
+
+      {/* Supervisor Cuadrilla Linkage Modal */}
+      <SupervisorLinkSelectorModal
+        isOpen={showSupervisorModal}
+        worker={worker}
+        currentSupervisorCode={linkedSupervisor.code}
+        onClose={() => setShowSupervisorModal(false)}
+        onSupervisorSelected={(selected) => {
+          setLinkedSupervisor(selected);
+        }}
+      />
+
+      {/* Digital Pass Modal */}
+      {evaluationResult && (
+        <DigitalPassModal
+          isOpen={showPassModal}
+          onClose={() => setShowPassModal(false)}
+          worker={evaluatedWorker}
+          evaluation={evaluationResult}
+        />
+      )}
 
     </div>
   );

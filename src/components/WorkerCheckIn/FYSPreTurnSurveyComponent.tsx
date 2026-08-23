@@ -45,7 +45,7 @@ export const FYSPreTurnSurveyComponent: React.FC<FYSPreTurnSurveyProps> = ({
   const currentWeather = weatherProp?.forecast?.[0] || worker?.weather?.forecast?.[0];
   const tomorrowWeather = weatherProp?.forecast?.[1] || worker?.weather?.forecast?.[1];
   const altitude = worker?.altitudeMeters || 3450;
-  const faena = worker?.faena || 'Faena Minera';
+  const faena = worker?.faena || 'Faena Operacional';
 
   const updateGeneral = (field: keyof FYSPreTurnSurvey, val: any) => {
     onChange({

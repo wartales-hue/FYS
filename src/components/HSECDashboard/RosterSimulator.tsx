@@ -74,7 +74,7 @@ export const RosterSimulator: React.FC = () => {
             className="w-full bg-white border border-slate-200 text-slate-800 rounded-lg p-2 focus:outline-none focus:border-slate-900"
           >
             <option value="7x7_continuous">7x7 Continuo (7D - 7Desc - 7N)</option>
-            <option value="4x3_mining">4x3 Faena Minera (4 días 12h)</option>
+            <option value="4x3_mining">4x3 Faena Operacional (4 días 12h)</option>
             <option value="5x2_standard">5x2 Turno Normal (8.5h)</option>
             <option value="14x14_extreme">14x14 Turno Extremo Cordillera</option>
           </select>
@@ -185,7 +185,7 @@ export const RosterSimulator: React.FC = () => {
 
         {/* Scientific recommendations */}
         <div className="bg-white p-3.5 rounded-xl border border-slate-200 text-xs space-y-1.5 text-slate-700">
-          <span className="font-bold text-amber-800 block">Recomendaciones FRMS para esta Programación:</span>
+          <span className="font-bold text-blue-900 block">Recomendaciones SGFS para esta Programación:</span>
           <ul className="space-y-1 text-slate-600 list-disc list-inside">
             {consecutiveNights > 4 && (
               <li>Reducir el bloque de noches continuas a un máximo de 4 noches seguidas para evitar acumulación crítica de sueño delta.</li>
