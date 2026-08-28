@@ -93,58 +93,58 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-50 shadow-md">
+    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-50 shadow-md w-full max-w-full overflow-x-hidden">
       {/* Main Top Header Bar (Membrete) */}
-      <div className="max-w-7xl mx-auto px-3.5 sm:px-6 py-2.5">
-        <div className="flex items-center justify-between gap-3">
+      <div className="max-w-7xl w-full mx-auto px-3 sm:px-6 py-2.5">
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
           
           {/* Brand & Identity */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white border border-blue-400/40 shadow-xs flex items-center justify-center p-1 flex-shrink-0">
-              <OpliraLogo size={28} />
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white border border-blue-400/40 shadow-xs flex items-center justify-center p-1 flex-shrink-0">
+              <OpliraLogo size={26} />
             </div>
 
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-lg font-black text-white tracking-tight leading-none">Oplira</span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                  Control Fatiga y Somnolencia
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-base sm:text-lg font-black text-white tracking-tight leading-none">Oplira</span>
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30 whitespace-nowrap">
+                  Control F&S
                 </span>
                 {!isOnline && (
-                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  <span className="text-[8px] sm:text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
                     Offline
                   </span>
                 )}
               </div>
-              <span className="text-[11px] text-slate-400 font-medium block truncate mt-0.5">
+              <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium block truncate mt-0.5">
                 {getRoleTitle(currentRole)}
               </span>
             </div>
           </div>
 
           {/* Quick Actions & Status on Right */}
-          <div className="flex items-center gap-2">
-            {/* Información Button (Accessible to everyone) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            {/* Información Button (Icon on mobile, text on desktop) */}
             <button
               id="header-informacion-btn"
               onClick={onOpenInformationModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white font-bold text-[11px] border border-slate-700 transition-colors cursor-pointer shadow-xs"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white font-bold text-[11px] border border-slate-700 transition-colors cursor-pointer shadow-xs"
               title="Información de la App y Validación Científica del Modelo"
             >
               <Info className="w-3.5 h-3.5 text-sky-400" />
-              <span>Información</span>
+              <span className="hidden md:inline">Información</span>
             </button>
 
             {/* Buzón de Mejoras o Comentarios (Accessible to everyone) */}
             <button
               id="header-mejoras-comentarios-btn"
               onClick={onOpenFeedbackModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-[11px] border border-slate-700 transition-colors cursor-pointer shadow-xs"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-[11px] border border-slate-700 transition-colors cursor-pointer shadow-xs"
               title="Buzón de mejoras, reclamos y sugerencias de faena"
             >
               <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Mejoras o Comentarios</span>
-              <span className="sm:hidden">Comentarios</span>
+              <span className="hidden lg:inline">Mejoras o Comentarios</span>
+              <span className="lg:hidden hidden md:inline">Comentarios</span>
             </button>
 
             {/* Nuevo Trabajador / Reiniciar Datos */}
@@ -170,7 +170,7 @@ export const Header: React.FC<HeaderProps> = ({
                 id="sync-now-btn"
                 onClick={onSyncNow}
                 disabled={isSyncing}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-75 text-white font-bold text-xs shadow-xs cursor-pointer transition-all"
+                className="flex items-center gap-1 px-2 sm:px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-75 text-white font-bold text-xs shadow-xs cursor-pointer transition-all"
                 title="Sincronizar evaluaciones pendientes"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Mobile Menu Toggle */}
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="md:hidden p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer border border-slate-700"
+              className="md:hidden p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer border border-slate-700 flex-shrink-0"
               aria-label="Abrir menú"
             >
               {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}

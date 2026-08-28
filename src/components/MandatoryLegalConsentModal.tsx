@@ -62,23 +62,23 @@ export const MandatoryLegalConsentModal: React.FC<MandatoryLegalConsentModalProp
         aria-modal="true"
       >
         {/* Header with Branding */}
-        <div className="p-4 sm:p-5 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-1.5 rounded-xl bg-slate-800/80 border border-slate-700 shadow-xs">
-              <OpliraLogo size={34} />
+        <div className="p-3.5 sm:p-5 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="p-1 rounded-xl bg-slate-800/80 border border-slate-700 shadow-xs flex-shrink-0">
+              <OpliraLogo size={28} />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                  <Scale className="w-3.5 h-3.5" />
-                  Marco Legal & Exención de Responsabilidad
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                  <Scale className="w-3 h-3" />
+                  Marco Legal & Exención
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
                   DS 44 / Ley 21.719
                 </span>
               </div>
-              <h2 className="text-base sm:text-lg font-bold tracking-tight text-white mt-0.5">
-                Declaración de Exención Individual de Responsabilidad por Uso de la Aplicación
+              <h2 className="text-xs sm:text-base font-bold tracking-tight text-white mt-0.5 leading-snug">
+                Declaración de Exención y Responsabilidad
               </h2>
             </div>
           </div>
@@ -87,9 +87,9 @@ export const MandatoryLegalConsentModal: React.FC<MandatoryLegalConsentModalProp
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer flex-shrink-0"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           )}
         </div>

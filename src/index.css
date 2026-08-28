@@ -13,6 +13,18 @@ html, body {
   font-family: 'Aptos', 'Aptos (cuerpo)', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  min-height: 100vh;
 }
 
 input, button, select, textarea, optgroup, option {

@@ -239,34 +239,34 @@ export const MandatoryPersonalDataModal: React.FC<MandatoryPersonalDataModalProp
           aria-modal="true"
         >
           {/* Header */}
-          <div className="p-4 sm:p-5 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="p-1.5 rounded-xl bg-slate-800/80 border border-slate-700 shadow-xs">
-                <OpliraLogo size={34} />
+          <div className="p-3.5 sm:p-5 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="p-1 rounded-xl bg-slate-800/80 border border-slate-700 shadow-xs flex-shrink-0">
+                <OpliraLogo size={28} />
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                    {currentStep === 1 ? <User className="w-3.5 h-3.5" /> : <Zap className="w-3.5 h-3.5" />}
-                    Paso {currentStep} de 2 Obligatorio
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                    {currentStep === 1 ? <User className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
+                    Paso {currentStep}/2 Obligatorio
                   </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
-                    {currentStep === 1 ? 'Registro de Datos Personales' : 'Calibración Línea Base PVT'}
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                    {currentStep === 1 ? 'Datos Personales' : 'Línea Base PVT'}
                   </span>
                 </div>
-                <h2 className="text-base sm:text-lg font-bold tracking-tight text-white mt-0.5">
+                <h2 className="text-xs sm:text-base font-bold tracking-tight text-white mt-0.5 leading-tight truncate sm:whitespace-normal">
                   {currentStep === 1 
-                    ? 'Ficha del Trabajador & Parámetros de Turno' 
-                    : 'Calibración de Línea Base Psicomotriz PVT'}
+                    ? 'Ficha del Trabajador & Turno' 
+                    : 'Calibración de Línea Base PVT'}
                 </h2>
               </div>
             </div>
 
             {/* Step Indicators */}
-            <div className="flex items-center gap-1.5">
-              <div className={`w-2.5 h-2.5 rounded-full ${currentStep === 1 ? 'bg-amber-400 ring-4 ring-amber-400/20' : 'bg-emerald-400'}`} />
-              <div className={`w-6 h-0.5 ${currentStep === 2 ? 'bg-amber-400' : 'bg-slate-700'}`} />
-              <div className={`w-2.5 h-2.5 rounded-full ${currentStep === 2 ? 'bg-amber-400 ring-4 ring-amber-400/20' : 'bg-slate-600'}`} />
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <div className={`w-2 h-2 rounded-full ${currentStep === 1 ? 'bg-amber-400 ring-2 ring-amber-400/30' : 'bg-emerald-400'}`} />
+              <div className={`w-4 h-0.5 ${currentStep === 2 ? 'bg-amber-400' : 'bg-slate-700'}`} />
+              <div className={`w-2 h-2 rounded-full ${currentStep === 2 ? 'bg-amber-400 ring-2 ring-amber-400/30' : 'bg-slate-600'}`} />
             </div>
           </div>
 

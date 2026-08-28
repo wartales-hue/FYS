@@ -333,7 +333,7 @@ export default function App() {
   const isConsentPending = currentWorker.profileCompleted && !currentWorker.legalConsent?.accepted;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-slate-800 selection:text-white security-protected-screen select-none">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-slate-800 selection:text-white security-protected-screen select-none">
       {/* Security Alert Toast (Anti-Screenshot / Ley 21.719 protection) */}
       {securityAlert && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[9999] bg-rose-950/95 border-2 border-rose-500 text-white px-5 py-3 rounded-2xl shadow-2xl text-xs font-semibold flex items-center gap-3 backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200 max-w-lg text-center">
