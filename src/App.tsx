@@ -328,6 +328,12 @@ export default function App() {
     showToast('✓ Entorno de Prueba Google Play cargado. Acceso completo y calibración habilitados.');
   };
 
+  const handleStartNewEvaluation = () => {
+    setState(prev => ({ ...prev, currentRole: 'worker' }));
+    setWorkerViewMode('checkin');
+    showToast('Iniciando nueva evaluación de Fatiga y Somnolencia (FYS)...');
+  };
+
   // Sequential Gating: 1. Personal Data -> 2. Informed Consent -> 3. App / Evaluation
   const isProfilePending = !currentWorker.profileCompleted;
   const isConsentPending = currentWorker.profileCompleted && !currentWorker.legalConsent?.accepted;
@@ -368,6 +374,7 @@ export default function App() {
         pendingSyncCount={state.pendingSyncCount}
         isSyncing={isSyncingGlobal}
         onSyncNow={handleSyncNow}
+        onStartNewEvaluation={handleStartNewEvaluation}
         onOpenPersonalData={handleOpenPersonalData}
         onOpenFeedbackModal={() => setIsFeedbackModalOpen(true)}
         onOpenInformationModal={() => setIsInformationModalOpen(true)}
