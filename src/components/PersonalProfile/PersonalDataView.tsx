@@ -110,6 +110,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
   // Micro PVT Baseline Calibration State
   const [isCalibratingBaseline, setIsCalibratingBaseline] = useState(false);
   const [calibrationSuccess, setCalibrationSuccess] = useState<string | null>(null);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
 
   // Weather state (using worker's weather or default)
   const [weatherData, setWeatherData] = useState<WeatherData>(
@@ -370,10 +371,23 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
   const handleMicroPvtComplete = (summary: PVTSummary) => {
     setIsCalibratingBaseline(false);
 
-    if (summary.validTrials < 3) {
-      setCalibrationSuccess('Prueba incompleta. Se requieren al menos 3 ensayos válidos.');
+    // Baseline validation: all 5 attempts must be yellow or green (<500ms, no false starts/lapses)
+    const redTrials = summary.trials.filter(t => t.isLapse || t.isFalseStart || t.reactionTimeMs >= 500 || t.reactionTimeMs <= 0);
+    if (redTrials.length > 0) {
+      setCalibrationSuccess(null);
+      setCalibrationError(`⚠️ Calibración rechazada: Se detectaron ${redTrials.length} ensayo(s) en zona roja (≥500 ms o anticipación). Para establecer tu Línea Base Oficial, todos los 5 intentos deben ser como mínimo amarillo (350–499 ms) o verde (<350 ms). Por favor repite la prueba.`);
+      setTimeout(() => setCalibrationError(null), 8000);
       return;
     }
+
+    if (summary.validTrials < 5) {
+      setCalibrationSuccess(null);
+      setCalibrationError('Prueba incompleta. Se requieren los 5 ensayos válidos sin anticipaciones.');
+      setTimeout(() => setCalibrationError(null), 6000);
+      return;
+    }
+
+    setCalibrationError(null);
 
     const updatedBaseline = {
       meanRT: summary.meanRT,
@@ -397,7 +411,7 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
     onUpdateWorker(updatedWorker);
     localStorage.setItem(`fys_profile_${worker.id}`, JSON.stringify(updatedWorker));
 
-    setCalibrationSuccess(`Línea base calibrada exitosamente: ${summary.meanRT} ms (${summary.validTrials} ensayos válidos).`);
+    setCalibrationSuccess(`✓ Línea base calibrada exitosamente: ${summary.meanRT} ms (${summary.validTrials} ensayos válidos en zona verde/amarillo).`);
     setTimeout(() => setCalibrationSuccess(null), 5000);
   };
 
@@ -900,6 +914,13 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <span>{calibrationSuccess}</span>
+              </div>
+            )}
+
+            {calibrationError && (
+              <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-rose-900 text-xs font-semibold flex items-start gap-2 animate-in fade-in">
+                <ShieldAlert className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                <span>{calibrationError}</span>
               </div>
             )}
 

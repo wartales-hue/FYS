@@ -302,64 +302,29 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   const [pdfDownloaded, setPdfDownloaded] = useState<boolean>(false);
   const [emailDispatchedOnFinalize, setEmailDispatchedOnFinalize] = useState<boolean>(false);
   const [showPassModal, setShowPassModal] = useState<boolean>(false);
-  const [isScrollLocked, setIsScrollLocked] = useState<boolean>(true);
-  const [lockCountdown, setLockCountdown] = useState<number>(2);
 
-  // 2-Second Temporary Scroll Lock on Step Navigation to ensure ad/header viewability (MRC Standard)
+  // Auto-scroll to top on step changes & listen for back-navigation events
   useEffect(() => {
-    // Scroll immediately to top
     if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     }
-
-    // Lock scroll for exactly 2 seconds
-    setIsScrollLocked(true);
-    setLockCountdown(2);
-
-    const prevBodyOverflow = document.body.style.overflow;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-
-    // Prevent touchmove and wheel scrolling across all touch and mobile devices
-    const preventScrollHandler = (e: Event) => {
-      e.preventDefault();
-    };
-
-    const preventKeyScroll = (e: KeyboardEvent) => {
-      if (['Space', 'PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', 'End', 'Home'].includes(e.code)) {
-        e.preventDefault();
-      }
-    };
-
-    window.addEventListener('touchmove', preventScrollHandler, { passive: false });
-    window.addEventListener('wheel', preventScrollHandler, { passive: false });
-    window.addEventListener('keydown', preventKeyScroll, { passive: false });
-
-    const tickTimer = setInterval(() => {
-      setLockCountdown((prev) => (prev > 1 ? prev - 1 : 0));
-    }, 1000);
-
-    const unlockTimer = setTimeout(() => {
-      document.body.style.overflow = prevBodyOverflow || '';
-      document.documentElement.style.overflow = prevHtmlOverflow || '';
-      window.removeEventListener('touchmove', preventScrollHandler);
-      window.removeEventListener('wheel', preventScrollHandler);
-      window.removeEventListener('keydown', preventKeyScroll);
-      setIsScrollLocked(false);
-      setLockCountdown(0);
-    }, 2000);
-
-    return () => {
-      clearInterval(tickTimer);
-      clearTimeout(unlockTimer);
-      document.body.style.overflow = prevBodyOverflow || '';
-      document.documentElement.style.overflow = prevHtmlOverflow || '';
-      window.removeEventListener('touchmove', preventScrollHandler);
-      window.removeEventListener('wheel', preventScrollHandler);
-      window.removeEventListener('keydown', preventKeyScroll);
-    };
   }, [currentStep]);
+
+  useEffect(() => {
+    const handleStepBackEvent = (e: CustomEvent) => {
+      setCurrentStep((prev) => {
+        if (prev > 1) {
+          return (prev - 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+        }
+        return prev;
+      });
+    };
+
+    window.addEventListener('fys:navigate-step-back' as any, handleStepBackEvent);
+    return () => {
+      window.removeEventListener('fys:navigate-step-back' as any, handleStepBackEvent);
+    };
+  }, []);
 
   const kssDescriptions = [
     { value: 1, label: 'Extremadamente alerta', desc: 'Máxima agudeza mental, sin fatiga.', color: 'border-emerald-500 text-emerald-400' },
@@ -798,21 +763,6 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
       {/* Dynamic Top Advertising / Operational Banner in All 8 Steps */}
       <div className="w-full relative">
         <AdBanner userRole="worker" />
-        
-        {/* 2-Second Mandatory Viewport Lock Banner & Shield */}
-        {isScrollLocked && (
-          <div className="mt-2 bg-slate-900/95 text-white border border-amber-400/50 rounded-xl px-3.5 py-2 flex items-center justify-between shadow-md text-xs animate-in fade-in slide-in-from-top-1 duration-200">
-            <div className="flex items-center gap-2">
-              <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
-              <span className="font-semibold text-slate-200 text-[11px] sm:text-xs">
-                Pausa de lectura y patrocinio HSEC obligatorio:
-              </span>
-            </div>
-            <span className="font-mono font-black bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-lg text-xs">
-              {lockCountdown}s
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Progress Steps Header */}
@@ -2263,19 +2213,22 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-2 pt-2">
             <button
-              id="finalize-checkin-btn"
+              id="return-to-main-page-btn"
+              type="button"
               onClick={handleFinalSubmit}
-              className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              className="flex-1 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer active:scale-98"
             >
               <CheckCircle className="w-4 h-4" />
-              <span>Finalizar y Guardar Evaluación</span>
+              <span>Volver a la Página Principal</span>
             </button>
             <button
+              id="start-new-evaluation-btn"
+              type="button"
               onClick={resetFlow}
-              className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              className="px-5 py-3.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs border border-slate-700"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Nueva Evaluación Completa</span>
+              <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
+              <span>Realizar una nueva evaluación</span>
             </button>
           </div>
         </div>

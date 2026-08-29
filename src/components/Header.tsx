@@ -96,8 +96,8 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-50 shadow-md w-full max-w-full overflow-x-hidden">
-      {/* Main Top Header Bar (Membrete) */}
-      <div className="w-full max-w-7xl mx-auto px-2.5 sm:px-6 py-2">
+      {/* Main Top Header Bar (Membrete con espaciado seguro para barra de estado del móvil) */}
+      <div className="w-full max-w-7xl mx-auto px-2.5 sm:px-6 pt-7 sm:pt-2.5 pb-2">
         <div className="flex flex-col gap-2">
           
           {/* First Row: Brand + Prominent Action Button + Quick Tools */}

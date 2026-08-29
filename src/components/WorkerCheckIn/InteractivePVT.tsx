@@ -551,19 +551,44 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
               </div>
             )}
 
+            {/* Baseline Strict Validation Warning for Micro-PVT */}
+            {mode === 'Micro-PVT' && trials.some(t => t.isLapse || t.isFalseStart || t.reactionTimeMs >= 500 || t.reactionTimeMs <= 0) && (
+              <div className="p-3.5 bg-rose-50 border-2 border-rose-400 rounded-xl space-y-1.5 text-xs text-rose-900 animate-in fade-in">
+                <div className="flex items-center gap-2 font-bold text-rose-950">
+                  <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                  <span>Calibración de Línea Base Rechazada (Intento en Zona Roja)</span>
+                </div>
+                <p className="text-[11px] text-rose-800 leading-relaxed">
+                  Para calibrar tu <strong>Línea Base Oficial</strong>, no se permite ningún intento en zona roja (≥500 ms o anticipación). Todos los 5 ensayos deben ser como mínimo <strong>amarillo (350–499 ms)</strong> o <strong>verde (&lt;350 ms)</strong>. Por favor, repite la prueba con atención plena.
+                </p>
+              </div>
+            )}
+
             {/* Accept & Advance Button */}
-            <button
-              id="confirm-pvt-continue-btn"
-              type="button"
-              onClick={() => {
-                if (lastSummary) onComplete(lastSummary);
-                if (onAcceptAndContinue) onAcceptAndContinue();
-              }}
-              className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
-            >
-              <span>Aceptar Resultado y Continuar a Medidas de Control y Firma</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            {mode === 'Micro-PVT' && trials.some(t => t.isLapse || t.isFalseStart || t.reactionTimeMs >= 500 || t.reactionTimeMs <= 0) ? (
+              <button
+                id="repeat-baseline-pvt-required-btn"
+                type="button"
+                onClick={() => startTest('Repetición obligatoria por ensayo en zona roja')}
+                className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer animate-pulse"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Repetir Calibración de Línea Base (Requerido: 5 Ensayos Verde/Amarillo)</span>
+              </button>
+            ) : (
+              <button
+                id="confirm-pvt-continue-btn"
+                type="button"
+                onClick={() => {
+                  if (lastSummary) onComplete(lastSummary);
+                  if (onAcceptAndContinue) onAcceptAndContinue();
+                }}
+                className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              >
+                <span>Aceptar Resultado y Continuar a Medidas de Control y Firma</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       )}

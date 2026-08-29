@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Header } from './components/Header';
 import { WorkerDashboard } from './components/WorkerDashboard/WorkerDashboard';
 import { SupervisorView } from './components/SupervisorDashboard/SupervisorView';
@@ -43,6 +44,93 @@ export default function App() {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState<boolean>(false);
   const [isInformationModalOpen, setIsInformationModalOpen] = useState<boolean>(false);
   const [isSyncingGlobal, setIsSyncingGlobal] = useState<boolean>(false);
+  const [evaluationSessionKey, setEvaluationSessionKey] = useState<number>(0);
+
+  // Hardware and browser Back Button listener for Android & Mobile
+  useEffect(() => {
+    const handleBackButton = () => {
+      // 1. Close any open modal first
+      if (isFeedbackModalOpen) {
+        setIsFeedbackModalOpen(false);
+        return;
+      }
+      if (isInformationModalOpen) {
+        setIsInformationModalOpen(false);
+        return;
+      }
+      if (isPremiumModalOpen) {
+        setIsPremiumModalOpen(false);
+        return;
+      }
+      if (isNonMedicalModalOpen) {
+        setIsNonMedicalModalOpen(false);
+        return;
+      }
+      if (isPermissionsModalOpen) {
+        setIsPermissionsModalOpen(false);
+        return;
+      }
+      if (isReviewerDemoModalOpen) {
+        setIsReviewerDemoModalOpen(false);
+        return;
+      }
+
+      // 2. If in checkin flow, step back or return to dashboard
+      if (workerViewMode === 'checkin') {
+        window.dispatchEvent(new CustomEvent('fys:navigate-step-back'));
+        return;
+      }
+
+      // 3. If in another worker sub-view, return to main worker dashboard
+      if (workerViewMode !== 'dashboard') {
+        setWorkerViewMode('dashboard');
+        return;
+      }
+
+      // 4. If in another role, return to worker role
+      if (state.currentRole !== 'worker') {
+        setState(prev => ({ ...prev, currentRole: 'worker' }));
+        return;
+      }
+    };
+
+    // Capacitor Native Android Hardware Back Button listener
+    let capListenerHandle: any = null;
+    try {
+      CapacitorApp.addListener('backButton', () => {
+        handleBackButton();
+      }).then(handle => {
+        capListenerHandle = handle;
+      }).catch(err => {
+        console.warn('Capacitor backButton listener note:', err);
+      });
+    } catch (e) {
+      // ignore
+    }
+
+    // Web Browser popstate listener
+    const handlePopState = (e: PopStateEvent) => {
+      e.preventDefault();
+      handleBackButton();
+    };
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      if (capListenerHandle && typeof capListenerHandle.remove === 'function') {
+        capListenerHandle.remove();
+      }
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [
+    isFeedbackModalOpen,
+    isInformationModalOpen,
+    isPremiumModalOpen,
+    isNonMedicalModalOpen,
+    isPermissionsModalOpen,
+    isReviewerDemoModalOpen,
+    workerViewMode,
+    state.currentRole
+  ]);
 
   // Screen security (anti-screenshot & data protection Ley 21.719)
   useEffect(() => {
@@ -330,6 +418,7 @@ export default function App() {
 
   const handleStartNewEvaluation = () => {
     setState(prev => ({ ...prev, currentRole: 'worker' }));
+    setEvaluationSessionKey(prev => prev + 1);
     setWorkerViewMode('checkin');
     showToast('Iniciando nueva evaluación de Fatiga y Somnolencia (FYS)...');
   };
@@ -432,6 +521,7 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5">
         {state.currentRole === 'worker' && (
           <WorkerDashboard
+            key={`worker-dash-${evaluationSessionKey}`}
             worker={currentWorker}
             latestEvaluation={getLatestEvaluation(currentWorker.id)}
             onSaveEvaluation={handleSaveEvaluation}

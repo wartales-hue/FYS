@@ -53,6 +53,7 @@ export const WorkerDashboard: React.FC<WorkerDashboardProps> = ({
   onViewModeChange,
 }) => {
   const [currentWorkerData, setCurrentWorkerData] = useState<WorkerProfile>(worker);
+  const [checkinSessionId, setCheckinSessionId] = useState<number>(0);
   const [internalViewMode, setInternalViewMode] = useState<'dashboard' | 'checkin' | 'micropvt' | 'privacy' | 'personal_data'>('dashboard');
   const [microPvtDone, setMicroPvtDone] = useState<boolean>(false);
   const [isDigitalPassOpen, setIsDigitalPassOpen] = useState<boolean>(false);
@@ -121,12 +122,13 @@ export const WorkerDashboard: React.FC<WorkerDashboardProps> = ({
         <div className="mb-4 flex items-center justify-between max-w-2xl mx-auto">
           <button
             onClick={() => setViewMode('dashboard')}
-            className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+            className="text-xs text-slate-500 hover:text-slate-900 font-bold flex items-center gap-1.5 cursor-pointer bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-2xs"
           >
-            ← Volver al Dashboard del Trabajador
+            ← Volver a la Página Principal
           </button>
         </div>
         <CheckInFlow
+          key={`checkin-flow-${checkinSessionId}`}
           worker={currentWorkerData}
           onCheckInComplete={(evalResult) => {
             onSaveEvaluation(evalResult);
@@ -389,13 +391,16 @@ export const WorkerDashboard: React.FC<WorkerDashboardProps> = ({
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <button
                   id="start-checkin-repeat-cta"
-                  onClick={() => setViewMode('checkin')}
+                  onClick={() => {
+                    setCheckinSessionId(prev => prev + 1);
+                    setViewMode('checkin');
+                  }}
                   disabled={disabled}
                   className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   title="Realizar una nueva evaluación si tus condiciones cambiaron"
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Realizar nueva evaluación Fatiga y Somnolencia</span>
+                  <span>Realizar una nueva evaluación</span>
                 </button>
               </div>
             </div>
