@@ -156,65 +156,71 @@ export const PersonalDataView: React.FC<PersonalDataViewProps> = ({
     setGpsModalError(null);
 
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = Number(position.coords.latitude.toFixed(4));
-          const long = Number(position.coords.longitude.toFixed(4));
-          const estimatedAltitude = position.coords.altitude ? Math.round(position.coords.altitude) : (altitudeMeters || 1240);
+      const handleSuccess = async (position: GeolocationPosition) => {
+        const lat = Number(position.coords.latitude.toFixed(4));
+        const long = Number(position.coords.longitude.toFixed(4));
+        const estimatedAltitude = position.coords.altitude ? Math.round(position.coords.altitude) : (altitudeMeters || 1240);
 
-          try {
-            const liveWeather = await fetchLiveWeatherFromCoords(lat, long, estimatedAltitude, faena || 'Faena Barreal Seco');
-            setWeatherData(liveWeather);
-            setAltitudeMeters(estimatedAltitude);
-            setGpsLoading(false);
-            setShowGpsModal(false);
-            setGpsMessage(`GPS & Clima Sincronizado: ${lat}, ${long} (${estimatedAltitude} msnm • ${liveWeather.forecast[0]?.currentTempC ?? 21}°C)`);
-
-            // Auto propagate updated worker data
-            onUpdateWorker({
-              ...worker,
-              name,
-              rut,
-              birthDate,
-              gender,
-              company,
-              role,
-              equipmentAssigned,
-              faena,
-              gpsEnabled: true,
-              gpsCoordinates: { latitude: lat, longitude: long },
-              altitudeMeters: estimatedAltitude,
-              weather: liveWeather
-            });
-          } catch (err) {
-            console.error('Error fetching live weather:', err);
-            setGpsLoading(false);
-          }
-        },
-        (error) => {
+        try {
+          const liveWeather = await fetchLiveWeatherFromCoords(lat, long, estimatedAltitude, faena || 'Faena Barreal Seco');
+          setWeatherData(liveWeather);
+          setAltitudeMeters(estimatedAltitude);
           setGpsLoading(false);
-          let errorMsg = 'Permiso denegado o satélites fuera de alcance.';
-          if (error.code === error.PERMISSION_DENIED) {
-            errorMsg = 'Permiso de ubicación denegado por el navegador/dispositivo.';
-          } else if (error.code === error.POSITION_UNAVAILABLE) {
-            errorMsg = 'Señal de satélite no disponible en la ubicación actual.';
-          } else if (error.code === error.TIMEOUT) {
-            errorMsg = 'Tiempo de espera de señal GPS agotado.';
-          }
-          setGpsModalError(errorMsg);
+          setShowGpsModal(false);
+          setGpsMessage(`GPS & Clima Sincronizado: ${lat}, ${long} (${estimatedAltitude} msnm • ${liveWeather.forecast[0]?.currentTempC ?? 21}°C)`);
 
-          // If user manually triggered or GPS never connected, display suggestion modal
-          if (isUserTriggered || !worker.weather?.isGpsConnected) {
-            setShowGpsModal(true);
-          }
-          setGpsMessage(`GPS no disponible (${errorMsg}). Utilizando faena ${faena}.`);
+          // Auto propagate updated worker data
+          onUpdateWorker({
+            ...worker,
+            name,
+            rut,
+            birthDate,
+            gender,
+            company,
+            role,
+            equipmentAssigned,
+            faena,
+            gpsEnabled: true,
+            gpsCoordinates: { latitude: lat, longitude: long },
+            altitudeMeters: estimatedAltitude,
+            weather: liveWeather
+          });
+        } catch (err) {
+          console.error('Error fetching live weather:', err);
+          setGpsLoading(false);
+        }
+      };
+
+      const handleFallbackError = (error: GeolocationPositionError) => {
+        setGpsLoading(false);
+        let errorMsg = 'Permiso denegado o satélites fuera de alcance.';
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMsg = 'Permiso de ubicación no concedido.';
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errorMsg = 'Señal satelital fuera de cobertura temporal.';
+        } else if (error.code === error.TIMEOUT) {
+          errorMsg = 'Tiempo de espera de señal GPS agotado.';
+        }
+        setGpsModalError(errorMsg);
+        setGpsMessage(`Ubicación de referencia: faena ${faena}.`);
+      };
+
+      // First attempt with high accuracy
+      navigator.geolocation.getCurrentPosition(
+        handleSuccess,
+        () => {
+          // Second attempt with low accuracy / cached GPS for reliability
+          navigator.geolocation.getCurrentPosition(
+            handleSuccess,
+            handleFallbackError,
+            { timeout: 6000, enableHighAccuracy: false, maximumAge: 300000 }
+          );
         },
-        { timeout: 8000, enableHighAccuracy: true }
+        { timeout: 4000, enableHighAccuracy: true }
       );
     } else {
       setGpsLoading(false);
       setGpsModalError('El dispositivo o navegador no soporta API de Geolocalización.');
-      setShowGpsModal(true);
     }
   };
 

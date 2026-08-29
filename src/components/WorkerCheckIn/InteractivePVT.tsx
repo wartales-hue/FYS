@@ -392,11 +392,17 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
 
           {gameState === 'trial_feedback' && (
             <div className="text-center space-y-2 pointer-events-none">
-              <div className={`font-mono text-4xl sm:text-5xl font-bold ${elapsedMs >= 500 ? 'text-amber-400' : 'text-emerald-400'}`}>
+              <div className={`font-mono text-4xl sm:text-5xl font-bold ${
+                elapsedMs >= 500 ? 'text-rose-500' : elapsedMs >= 350 ? 'text-amber-400' : 'text-emerald-400'
+              }`}>
                 {elapsedMs} <span className="text-sm font-normal">ms</span>
               </div>
               <p className={`text-xs font-semibold px-3 py-1 rounded-full inline-block ${
-                elapsedMs >= 500 ? 'bg-amber-950 text-amber-300 border border-amber-700' : 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                elapsedMs >= 500
+                  ? 'bg-rose-950 text-rose-300 border border-rose-700'
+                  : elapsedMs >= 350
+                  ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                  : 'bg-emerald-950 text-emerald-300 border border-emerald-700'
               }`}>
                 {feedbackMessage}
               </p>
@@ -405,9 +411,9 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
 
           {gameState === 'false_start' && (
             <div className="text-center space-y-2 pointer-events-none p-4">
-              <AlertCircle className="w-10 h-10 text-amber-400 mx-auto" />
-              <p className="text-sm font-bold text-amber-200">¡Anticipación!</p>
-              <p className="text-xs text-amber-300/80 max-w-xs mx-auto">
+              <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
+              <p className="text-sm font-bold text-rose-200">¡Anticipación / Presión Antes de Tiempo!</p>
+              <p className="text-xs text-rose-300/90 max-w-xs mx-auto">
                 {feedbackMessage}
               </p>
             </div>
@@ -466,6 +472,53 @@ export const InteractivePVT: React.FC<InteractivePVTProps> = ({
               <span className="font-mono text-base font-bold text-slate-700">
                 {trials.filter(t => t.isFalseStart).length}
               </span>
+            </div>
+          </div>
+
+          {/* Detailed Trial by Trial Results List */}
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+            <span className="text-[11px] font-bold text-slate-700 block">
+              Registro Detallado de Ensayos Realizados:
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {trials.map((t, index) => {
+                const isRed = t.isLapse || t.isFalseStart || t.reactionTimeMs >= 500 || t.reactionTimeMs <= 0;
+                const isYellow = !isRed && t.reactionTimeMs >= 350;
+                const isGreen = !isRed && !isYellow;
+
+                return (
+                  <div
+                    key={t.trialNumber || index}
+                    className={`p-2.5 rounded-lg border text-xs flex items-center justify-between font-medium ${
+                      isRed
+                        ? 'bg-rose-50 border-rose-300 text-rose-900'
+                        : isYellow
+                        ? 'bg-amber-50 border-amber-300 text-amber-900'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-[11px]">Ensayo #{index + 1}:</span>
+                      {t.isFalseStart ? (
+                        <span className="font-mono font-bold text-rose-700">Anticipación</span>
+                      ) : (
+                        <span className="font-mono font-bold">{t.reactionTimeMs} ms</span>
+                      )}
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase ${
+                        isRed
+                          ? 'bg-rose-200 text-rose-800'
+                          : isYellow
+                          ? 'bg-amber-200 text-amber-800'
+                          : 'bg-emerald-200 text-emerald-800'
+                      }`}
+                    >
+                      {isRed ? 'Rojo (Alerta)' : isYellow ? 'Amarillo' : 'Verde'}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

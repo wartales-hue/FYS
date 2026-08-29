@@ -303,10 +303,18 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
   const [emailDispatchedOnFinalize, setEmailDispatchedOnFinalize] = useState<boolean>(false);
   const [showPassModal, setShowPassModal] = useState<boolean>(false);
 
-  // Auto-scroll to top on step changes & listen for back-navigation events
+  // Auto-scroll to top on step changes with 2-second scroll lock to prevent accidental erratic gestures (without popup)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+      document.body.style.overflow = 'hidden';
+      const timer = setTimeout(() => {
+        document.body.style.overflow = '';
+      }, 2000);
+      return () => {
+        clearTimeout(timer);
+        document.body.style.overflow = '';
+      };
     }
   }, [currentStep]);
 
@@ -511,6 +519,17 @@ export const CheckInFlow: React.FC<CheckInFlowProps> = ({
       } catch (cbErr) {
         console.warn('onCheckInComplete callback note:', cbErr);
       }
+
+      // Auto-trigger PDF download directly upon finalizing evaluation (Step 8)
+      setTimeout(async () => {
+        try {
+          await downloadEvaluationPDF(evaluatedWorker, finalEvaluation, sleepRecord, validPvtSummary);
+          setPdfGenerated(true);
+          setPdfDownloaded(true);
+        } catch (pdfErr) {
+          console.warn('Auto PDF download note:', pdfErr);
+        }
+      }, 700);
 
       // 3. Proactively enqueue and trigger supervisor email dispatch immediately upon evaluation generation (Paid Supervisor Feature)
       if (isSupervisorPaid(linkedSupervisor)) {
